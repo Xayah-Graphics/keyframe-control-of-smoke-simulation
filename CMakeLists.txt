@@ -37,6 +37,24 @@ endif ()
 # ============================================================================
 find_package(CUDAToolkit 13.2 REQUIRED)
 
+
+# ============================================================================
+# Libraries
+# ============================================================================
+add_library(keyframe)
+target_sources(
+        keyframe
+        PRIVATE
+        keyframe.cu
+        keyframe.cpp
+        keyframe.h
+        PUBLIC
+        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        keyframe.ixx
+)
+target_link_libraries(keyframe PRIVATE CUDA::cublas CUDA::cublasLt)
+set_property(TARGET keyframe PROPERTY CXX_MODULE_STD ON)
+
 add_executable(test main.cpp)
-target_link_libraries(test PRIVATE CUDA::cudart CUDA::cublas CUDA::cusparse)
+target_link_libraries(test PRIVATE keyframe)
 set_property(TARGET test PROPERTY CXX_MODULE_STD ON)
