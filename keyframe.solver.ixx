@@ -74,7 +74,7 @@ namespace kfs::solver {
 
     export struct PlumeSource final {
         std::array<float, 3> center{0.5f, 0.12f, 0.5f};
-        std::array<float, 3> radius{0.07f, 0.05f, 0.07f};
+        std::array<float, 3> radius{0.13f, 0.08f, 0.13f};
         float density{18.0f};
         float temperature{36.0f};
         float falloff{2.2f};

@@ -3,6 +3,7 @@ set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 project(keyframe-control-of-smoke-simulation VERSION 1.0.0 LANGUAGES CXX CUDA)
 
 option(KEYFRAME_BUILD_APP "Build the optional Keyframe executable" ON)
+option(KEYFRAME_BUILD_PROJECT_PLUGIN "Build the optional Spectra project plugin" OFF)
 
 # ============================================================================
 # C++ Configuration
@@ -116,4 +117,23 @@ if (KEYFRAME_BUILD_APP)
     add_executable(keyframe main.cpp)
     target_link_libraries(keyframe PRIVATE xayah-util-xcli libkeyframe)
     set_property(TARGET keyframe PROPERTY CXX_MODULE_STD ON)
+endif ()
+
+
+# ============================================================================
+# Optional Project Plugin
+# ============================================================================
+if (KEYFRAME_BUILD_PROJECT_PLUGIN)
+    add_library(keyframe_project_plugin SHARED)
+    target_sources(
+            keyframe_project_plugin
+            PRIVATE
+            keyframe.project.cpp
+            PRIVATE
+            FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            keyframe.plugin.ixx
+            keyframe.project.ixx
+    )
+    target_link_libraries(keyframe_project_plugin PRIVATE libkeyframe CUDA::cudart)
+    set_property(TARGET keyframe_project_plugin PROPERTY CXX_MODULE_STD ON)
 endif ()

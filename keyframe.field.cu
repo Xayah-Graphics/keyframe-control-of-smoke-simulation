@@ -149,17 +149,20 @@ namespace kfs::cuda {
         }
 
         ScalarField3D::~ScalarField3D() noexcept {
-            free_device_buffers(this->data);
-            this->resolution = empty_resolution;
+            if (this->storage_kind == ScalarFieldStorageKind::owned) free_device_buffers(this->data);
+            this->resolution   = empty_resolution;
+            this->data         = nullptr;
+            this->storage_kind = ScalarFieldStorageKind::owned;
         }
 
-        ScalarField3D::ScalarField3D(ScalarField3D&& other) noexcept : resolution{std::exchange(other.resolution, empty_resolution)}, data{std::exchange(other.data, nullptr)} {}
+        ScalarField3D::ScalarField3D(ScalarField3D&& other) noexcept : resolution{std::exchange(other.resolution, empty_resolution)}, data{std::exchange(other.data, nullptr)}, storage_kind{std::exchange(other.storage_kind, ScalarFieldStorageKind::owned)} {}
 
         ScalarField3D& ScalarField3D::operator=(ScalarField3D&& other) noexcept {
             if (this == &other) return *this;
-            free_device_buffers(this->data);
-            this->resolution = std::exchange(other.resolution, empty_resolution);
-            this->data       = std::exchange(other.data, nullptr);
+            if (this->storage_kind == ScalarFieldStorageKind::owned) free_device_buffers(this->data);
+            this->resolution   = std::exchange(other.resolution, empty_resolution);
+            this->data         = std::exchange(other.data, nullptr);
+            this->storage_kind = std::exchange(other.storage_kind, ScalarFieldStorageKind::owned);
             return *this;
         }
 
@@ -172,18 +175,31 @@ namespace kfs::cuda {
         }
 
         void ScalarField3D::resize(const std::array<std::int32_t, 3> resolution) {
-            if (this->resolution == resolution) return;
+            if (this->resolution == resolution && this->storage_kind == ScalarFieldStorageKind::owned) return;
             if (resolution == empty_resolution) {
-                free_device_buffers(this->data);
-                this->resolution = empty_resolution;
+                if (this->storage_kind == ScalarFieldStorageKind::owned) free_device_buffers(this->data);
+                this->resolution   = empty_resolution;
+                this->data         = nullptr;
+                this->storage_kind = ScalarFieldStorageKind::owned;
                 return;
             }
 
             float* next = nullptr;
             if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next), cell_element_count(resolution) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc scalar field: "} + cudaGetErrorString(status)};
-            free_device_buffers(this->data);
-            this->data       = next;
-            this->resolution = resolution;
+            if (this->storage_kind == ScalarFieldStorageKind::owned) free_device_buffers(this->data);
+            this->data         = next;
+            this->resolution   = resolution;
+            this->storage_kind = ScalarFieldStorageKind::owned;
+        }
+
+        void ScalarField3D::bind_external(const std::array<std::int32_t, 3> resolution, float* const data) {
+            if (resolution == empty_resolution) throw std::runtime_error{"external field resolution is empty"};
+            static_cast<void>(cell_element_count(resolution));
+            if (data == nullptr) throw std::runtime_error{"external field data is null"};
+            if (this->storage_kind == ScalarFieldStorageKind::owned) free_device_buffers(this->data);
+            this->resolution   = resolution;
+            this->data         = data;
+            this->storage_kind = ScalarFieldStorageKind::external;
         }
 
         void ScalarField3D::fill(cudaStream_t stream, const float value) {

@@ -2,7 +2,6 @@
 #define KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_H
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <cuda_runtime.h>
 
@@ -21,6 +20,11 @@ namespace kfs::cuda {
     namespace field {
         struct StaggeredVectorField3D;
 
+        enum class ScalarFieldStorageKind : std::uint32_t {
+            owned    = 0u,
+            external = 1u,
+        };
+
         struct ScalarField3D final {
             explicit ScalarField3D(std::array<std::int32_t, 3> resolution);
             ~ScalarField3D() noexcept;
@@ -33,10 +37,12 @@ namespace kfs::cuda {
             [[nodiscard]] std::size_t bytes() const;
 
             void resize(std::array<std::int32_t, 3> resolution);
+            void bind_external(std::array<std::int32_t, 3> resolution, float* data);
             void fill(cudaStream_t stream, float value);
 
             std::array<std::int32_t, 3> resolution;
             float* data{nullptr};
+            ScalarFieldStorageKind storage_kind{ScalarFieldStorageKind::owned};
         };
 
         struct CenteredVectorField3D final {
