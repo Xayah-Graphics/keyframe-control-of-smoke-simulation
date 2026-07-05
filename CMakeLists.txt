@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 project(keyframe-control-of-smoke-simulation VERSION 1.0.0 LANGUAGES CXX CUDA)
 
+option(KEYFRAME_BUILD_APP "Build the optional Keyframe executable" ON)
 
 # ============================================================================
 # C++ Configuration
@@ -41,9 +42,9 @@ find_package(CUDAToolkit 13.2 REQUIRED)
 # ============================================================================
 # Libraries
 # ============================================================================
-add_library(keyframe)
+add_library(libkeyframe)
 target_sources(
-        keyframe
+        libkeyframe
         PRIVATE
         keyframe.cu
         keyframe.cpp
@@ -52,9 +53,15 @@ target_sources(
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         keyframe.ixx
 )
-target_link_libraries(keyframe PRIVATE CUDA::cublas CUDA::cublasLt)
-set_property(TARGET keyframe PROPERTY CXX_MODULE_STD ON)
+target_link_libraries(libkeyframe PRIVATE CUDA::cublas CUDA::cublasLt)
+set_property(TARGET libkeyframe PROPERTY CXX_MODULE_STD ON)
 
-add_executable(test main.cpp)
-target_link_libraries(test PRIVATE keyframe)
-set_property(TARGET test PROPERTY CXX_MODULE_STD ON)
+
+# ============================================================================
+# Optional App
+# ============================================================================
+if (KEYFRAME_BUILD_APP)
+    add_executable(keyframe main.cpp)
+    target_link_libraries(keyframe PRIVATE libkeyframe)
+    set_property(TARGET keyframe PROPERTY CXX_MODULE_STD ON)
+endif ()
