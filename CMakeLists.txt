@@ -38,6 +38,30 @@ endif ()
 # ============================================================================
 find_package(CUDAToolkit 13.2 REQUIRED)
 
+function(download_if_needed url out_path)
+    if (EXISTS "${out_path}")
+        message(STATUS "Using cached file: ${out_path}")
+        return()
+    endif ()
+
+    get_filename_component(out_dir "${out_path}" DIRECTORY)
+    file(MAKE_DIRECTORY "${out_dir}")
+
+    message(STATUS "Downloading ${url}")
+    file(DOWNLOAD
+            "${url}"
+            "${out_path}"
+            TLS_VERIFY ON
+            STATUS dl_status
+    )
+
+    list(GET dl_status 0 dl_code)
+    list(GET dl_status 1 dl_msg)
+    if (NOT dl_code EQUAL 0)
+        message(FATAL_ERROR "Failed to download ${url}: [${dl_code}] ${dl_msg}")
+    endif ()
+endfunction()
+
 
 # ============================================================================
 # Libraries
@@ -46,14 +70,20 @@ add_library(libkeyframe)
 target_sources(
         libkeyframe
         PRIVATE
-        keyframe.cu
-        keyframe.cpp
-        keyframe.h
+        keyframe.field.cu
+        keyframe.field.h
+        keyframe.solver.cu
+        keyframe.solver.cpp
+        keyframe.solver.h
+        keyframe.inspector.cu
+        keyframe.inspector.cpp
+        keyframe.inspector.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        keyframe.ixx
+        keyframe.solver.ixx
+        keyframe.inspector.ixx
 )
-target_link_libraries(libkeyframe PRIVATE CUDA::cublas CUDA::cublasLt)
+target_link_libraries(libkeyframe PRIVATE CUDA::cudart CUDA::cublas CUDA::cusparse)
 set_property(TARGET libkeyframe PROPERTY CXX_MODULE_STD ON)
 
 
@@ -61,7 +91,29 @@ set_property(TARGET libkeyframe PROPERTY CXX_MODULE_STD ON)
 # Optional App
 # ============================================================================
 if (KEYFRAME_BUILD_APP)
+    set(KEYFRAME_UTIL_GIT_TAG "bb261075e7c8a4722b23f42c3be01aa24024731a")
+    set(KEYFRAME_UTIL_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/util/${KEYFRAME_UTIL_GIT_TAG}")
+    download_if_needed(
+            "https://raw.githubusercontent.com/Xayah-Graphics/util/${KEYFRAME_UTIL_GIT_TAG}/xcli.ixx"
+            "${KEYFRAME_UTIL_VENDOR_DIR}/xcli.ixx"
+    )
+    download_if_needed(
+            "https://raw.githubusercontent.com/Xayah-Graphics/util/${KEYFRAME_UTIL_GIT_TAG}/xcli.cpp"
+            "${KEYFRAME_UTIL_VENDOR_DIR}/xcli.cpp"
+    )
+
+    add_library(xayah-util-xcli)
+    target_sources(
+            xayah-util-xcli
+            PRIVATE
+            "${KEYFRAME_UTIL_VENDOR_DIR}/xcli.cpp"
+            PUBLIC
+            FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            "${KEYFRAME_UTIL_VENDOR_DIR}/xcli.ixx"
+    )
+    set_property(TARGET xayah-util-xcli PROPERTY CXX_MODULE_STD ON)
+
     add_executable(keyframe main.cpp)
-    target_link_libraries(keyframe PRIVATE libkeyframe)
+    target_link_libraries(keyframe PRIVATE xayah-util-xcli libkeyframe)
     set_property(TARGET keyframe PROPERTY CXX_MODULE_STD ON)
 endif ()
