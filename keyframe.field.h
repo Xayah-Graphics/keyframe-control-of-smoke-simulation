@@ -18,8 +18,6 @@ namespace kfs::cuda {
     }
 
     namespace field {
-        struct StaggeredVectorField3D;
-
         enum class ScalarFieldStorageKind : std::uint32_t {
             owned    = 0u,
             external = 1u,
