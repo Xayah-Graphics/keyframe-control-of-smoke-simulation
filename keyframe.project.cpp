@@ -32,17 +32,17 @@ import std;
 
 namespace kfs::project {
     namespace {
-        constexpr char section_simulation_id[]       = "simulation";
-        constexpr char section_view_id[]             = "view";
-        constexpr char section_statistics_id[]       = "statistics";
-        constexpr char setting_show_volume_key[]     = "show_volume";
-        constexpr char setting_density_scale_key[]   = "density_scale";
-        constexpr char setting_show_domain_key[]     = "show_domain";
-        constexpr char density_volume_name[]         = "Keyframe Smoke Density";
-        constexpr char density_material_name[]       = "Keyframe Smoke Density Material";
-        constexpr char density_light_name[]          = "Keyframe Smoke Key Light";
-        constexpr char domain_segments_name[]        = "Keyframe Smoke Domain";
-        constexpr float default_density_scale        = 4.0f;
+        constexpr char section_simulation_id[]     = "simulation";
+        constexpr char section_view_id[]           = "view";
+        constexpr char section_statistics_id[]     = "statistics";
+        constexpr char setting_show_volume_key[]   = "show_volume";
+        constexpr char setting_density_scale_key[] = "density_scale";
+        constexpr char setting_show_domain_key[]   = "show_domain";
+        constexpr char density_volume_name[]       = "Keyframe Smoke Density";
+        constexpr char density_material_name[]     = "Keyframe Smoke Density Material";
+        constexpr char density_light_name[]        = "Keyframe Smoke Key Light";
+        constexpr char domain_segments_name[]      = "Keyframe Smoke Domain";
+        constexpr float default_density_scale      = 4.0f;
 
         struct DebugOptions final {
             bool show_volume{true};
@@ -390,8 +390,8 @@ namespace kfs::project {
             state.smoke->device.density_data.bind_external({state.smoke->host.nx, state.smoke->host.ny, state.smoke->host.nz}, density_values);
             field::fill(state.smoke->host.stream, state.smoke->device.density_data, 0.0f);
             if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density external bind failed: "} + cudaGetErrorString(status)};
-            state.density_external_bound    = true;
-            state.exported_density_revision = 0u;
+            state.density_external_bound     = true;
+            state.exported_density_revision  = 0u;
             state.exported_density_byte_size = 0u;
             state.density_volume.reset();
         }
@@ -481,12 +481,12 @@ namespace kfs::project {
     }
 
     Project Project::open(plugin::OpenContext context) {
-        OpenOptions options = parse_open_options(std::span<const plugin::Option>{context.options});
-        auto state          = std::make_unique<State>();
-        state->open         = options;
-        state->debug        = DebugOptions{.density_scale = options.density_scale};
+        OpenOptions options  = parse_open_options(std::span<const plugin::Option>{context.options});
+        auto state           = std::make_unique<State>();
+        state->open          = options;
+        state->debug         = DebugOptions{.density_scale = options.density_scale};
         state->host_services = std::move(context.host_services);
-        state->smoke        = std::make_unique<solver::Solver>(options.config);
+        state->smoke         = std::make_unique<solver::Solver>(options.config);
         publish_domain_if_ready(*state);
         state->latest_frame_stats = inspector::Inspector{*state->smoke}.frame_stats(static_cast<int>(state->smoke->host.current_step));
         return Project{std::move(state)};

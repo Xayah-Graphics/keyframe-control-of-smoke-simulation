@@ -35,13 +35,13 @@ namespace kfs::solver {
         }
 
         void initialize_host(Solver::HostData& host, const Config& config) {
-            host.nx                          = static_cast<std::int32_t>(config.resolution[0]);
-            host.ny                          = static_cast<std::int32_t>(config.resolution[1]);
-            host.nz                          = static_cast<std::int32_t>(config.resolution[2]);
-            host.cell_size                   = config.cell_size;
-            host.ambient_temperature         = config.ambient_temperature;
-            host.boundary = boundary::pack(config.boundary);
-            const auto cell_count = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
+            host.nx                  = static_cast<std::int32_t>(config.resolution[0]);
+            host.ny                  = static_cast<std::int32_t>(config.resolution[1]);
+            host.nz                  = static_cast<std::int32_t>(config.resolution[2]);
+            host.cell_size           = config.cell_size;
+            host.ambient_temperature = config.ambient_temperature;
+            host.boundary            = boundary::pack(config.boundary);
+            const auto cell_count    = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
             host.density_source.resize(cell_count, 0.0f);
             host.temperature_source.resize(cell_count, 0.0f);
         }
@@ -193,8 +193,8 @@ namespace kfs::solver {
         try {
             if (!std::isfinite(request.delta_seconds) || request.delta_seconds < 0.0f) throw std::runtime_error{"Keyframe smoke delta_seconds must be finite and non-negative"};
             if (request.iterations < 1) throw std::runtime_error{"Keyframe smoke step iterations must be positive"};
-            auto& host   = this->host;
-            auto& device = this->device;
+            auto& host                = this->host;
+            auto& device              = this->device;
             const auto& flow_boundary = host.boundary.flow;
             const auto step_start     = std::chrono::steady_clock::now();
             const float delta_seconds = request.delta_seconds;

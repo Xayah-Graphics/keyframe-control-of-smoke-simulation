@@ -6,22 +6,13 @@ import std;
 import keyframe.solver;
 
 namespace kfs::inspector {
-namespace {
-    void require_initialized(const solver::Solver& smoke) {
-        if (smoke.host.stream == nullptr) throw std::runtime_error{"keyframe solver is not initialized."};
-        if (smoke.device.density_data.data == nullptr || smoke.device.temperature_data.data == nullptr) throw std::runtime_error{"keyframe scalar fields are not initialized."};
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
-            if (smoke.device.velocity.data[axis] == nullptr) throw std::runtime_error{"keyframe velocity field is not initialized."};
-    }
-} // namespace
-
     Inspector::Inspector(const solver::Solver& smoke) : smoke{std::addressof(smoke)} {}
 
     SolverDeviceView Inspector::device_view() const {
         if (this->smoke == nullptr) throw std::runtime_error{"keyframe inspector solver is null."};
-        const auto& host       = this->smoke->host;
-        const auto& velocity   = this->smoke->device.velocity;
-        const auto cell_count  = this->smoke->device.density_data.count();
+        const auto& host      = this->smoke->host;
+        const auto& velocity  = this->smoke->device.velocity;
+        const auto cell_count = this->smoke->device.density_data.count();
         return SolverDeviceView{
             .resolution     = {static_cast<std::uint32_t>(host.nx), static_cast<std::uint32_t>(host.ny), static_cast<std::uint32_t>(host.nz)},
             .cell_count     = cell_count,
@@ -35,11 +26,14 @@ namespace {
 
     FrameSnapshot Inspector::read_frame(const int frame_index) const {
         if (this->smoke == nullptr) throw std::runtime_error{"keyframe inspector solver is null."};
-        require_initialized(*this->smoke);
+        if (this->smoke->host.stream == nullptr) throw std::runtime_error{"keyframe solver is not initialized."};
+        if (this->smoke->device.density_data.data == nullptr || this->smoke->device.temperature_data.data == nullptr) throw std::runtime_error{"keyframe scalar fields are not initialized."};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (this->smoke->device.velocity.data[axis] == nullptr) throw std::runtime_error{"keyframe velocity field is not initialized."};
         FrameSnapshot frame{};
-        frame.frame_index = frame_index;
-        frame.resolution  = {static_cast<std::uint32_t>(this->smoke->host.nx), static_cast<std::uint32_t>(this->smoke->host.ny), static_cast<std::uint32_t>(this->smoke->host.nz)};
-        frame.cell_size   = this->smoke->host.cell_size;
+        frame.frame_index     = frame_index;
+        frame.resolution      = {static_cast<std::uint32_t>(this->smoke->host.nx), static_cast<std::uint32_t>(this->smoke->host.ny), static_cast<std::uint32_t>(this->smoke->host.nz)};
+        frame.cell_size       = this->smoke->host.cell_size;
         const auto cell_count = this->smoke->device.density_data.count();
         const std::array velocities{
             this->smoke->device.velocity.count(0u),
@@ -61,7 +55,10 @@ namespace {
 
     FrameStats Inspector::frame_stats(const int frame_index) const {
         if (this->smoke == nullptr) throw std::runtime_error{"keyframe inspector solver is null."};
-        require_initialized(*this->smoke);
+        if (this->smoke->host.stream == nullptr) throw std::runtime_error{"keyframe solver is not initialized."};
+        if (this->smoke->device.density_data.data == nullptr || this->smoke->device.temperature_data.data == nullptr) throw std::runtime_error{"keyframe scalar fields are not initialized."};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (this->smoke->device.velocity.data[axis] == nullptr) throw std::runtime_error{"keyframe velocity field is not initialized."};
         cuda::ScalarReadbackStats density{};
         cuda::ScalarReadbackStats temperature{};
         const auto cell_count = this->smoke->device.density_data.count();

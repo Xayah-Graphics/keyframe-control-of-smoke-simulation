@@ -1,6 +1,5 @@
-#include "keyframe.operators.advection.h"
 #include "../keyframe.boundary.h"
-#include <cmath>
+#include "keyframe.operators.advection.h"
 #include <stdexcept>
 #include <string>
 
@@ -9,28 +8,6 @@ namespace kfs::cuda::operators::advection {
 
     unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
-    }
-
-    dim3 advection_block() {
-        return dim3{8u, 8u, 4u};
-    }
-
-    void require_resolution(const int nx, const int ny, const int nz) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Advection resolution must be positive"};
-    }
-
-    dim3 centered_scalar_grid(const int nx, const int ny, const int nz, const dim3& block) {
-        require_resolution(nx, ny, nz);
-        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
-    }
-
-    dim3 staggered_component_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3& block) {
-        if (axis >= 3u) throw std::runtime_error{"advect_staggered_component: axis must be 0, 1, or 2"};
-        require_resolution(nx, ny, nz);
-        const auto sx = static_cast<std::uint64_t>(nx) + (axis == 0u ? 1u : 0u);
-        const auto sy = static_cast<std::uint64_t>(ny) + (axis == 1u ? 1u : 0u);
-        const auto sz = static_cast<std::uint64_t>(nz) + (axis == 2u ? 1u : 0u);
-        return dim3{ceil_div_u32(sx, block.x), ceil_div_u32(sy, block.y), ceil_div_u32(sz, block.z)};
     }
 
     __device__ int axis_cells(const std::uint32_t dimension, const int nx, const int ny, const int nz) {
@@ -336,16 +313,22 @@ namespace kfs::cuda::operators::advection {
     }
 
     void advect_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* boundary_types, const float* boundary_values) {
-        const dim3 block             = advection_block();
-        const dim3 grid              = staggered_component_grid(axis, nx, ny, nz, block);
+        if (axis >= 3u) throw std::runtime_error{"advect_staggered_component: axis must be 0, 1, or 2"};
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Advection resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const auto sx = static_cast<std::uint64_t>(nx) + (axis == 0u ? 1u : 0u);
+        const auto sy = static_cast<std::uint64_t>(ny) + (axis == 1u ? 1u : 0u);
+        const auto sz = static_cast<std::uint64_t>(nz) + (axis == 2u ? 1u : 0u);
+        const dim3 grid{ceil_div_u32(sx, block.x), ceil_div_u32(sy, block.y), ceil_div_u32(sz, block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(boundary_types, boundary_values);
         advect_staggered_component_kernel<<<grid, block, 0, stream>>>(axis, destination, source, vector_x, vector_y, vector_z, cell_mask, nx, ny, nz, h, dt, advection_mode, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_staggered_component_kernel: "} + cudaGetErrorString(status)};
     }
 
     void advect_centered_scalar(cudaStream_t stream, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values, const std::uint32_t* vector_boundary_types, const float* vector_boundary_values) {
-        const dim3 block                      = advection_block();
-        const dim3 grid                       = centered_scalar_grid(nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Advection resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::ScalarBoundary scalar_boundary = boundary::make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
         const boundary::FlowBoundary vector_boundary   = boundary::make_flow_velocity_boundary(vector_boundary_types, vector_boundary_values);
         advect_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, vector_x, vector_y, vector_z, cell_mask, nx, ny, nz, h, dt, advection_mode, scalar_boundary, vector_boundary);

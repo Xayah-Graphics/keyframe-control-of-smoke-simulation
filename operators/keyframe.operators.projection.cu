@@ -1,49 +1,11 @@
-#include "keyframe.operators.projection.h"
 #include "../keyframe.boundary.h"
-#include <cmath>
+#include "keyframe.operators.projection.h"
 #include <stdexcept>
 #include <string>
 
 namespace kfs::cuda::operators::projection {
     unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
-    }
-
-    dim3 cell_block() {
-        return dim3{8u, 8u, 4u};
-    }
-
-    unsigned linear_block() {
-        return 256u;
-    }
-
-    void require_count(const std::uint64_t count) {
-        if (count == 0u) throw std::runtime_error{"Projection launch count must be positive"};
-    }
-
-    void require_resolution(const int nx, const int ny, const int nz) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
-    }
-
-    unsigned linear_launch_grid(const std::uint64_t count, const unsigned block) {
-        require_count(count);
-        return ceil_div_u32(count, block);
-    }
-
-    dim3 scalar_launch_grid(const int nx, const int ny, const int nz, const dim3& block) {
-        require_resolution(nx, ny, nz);
-        return dim3(ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z));
-    }
-
-    dim3 staggered_launch_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3& block) {
-        if (axis >= 3u) throw std::runtime_error{"Projection staggered launch axis must be 0, 1, or 2"};
-        require_resolution(nx, ny, nz);
-        const auto nx64 = static_cast<std::uint64_t>(nx);
-        const auto ny64 = static_cast<std::uint64_t>(ny);
-        const auto nz64 = static_cast<std::uint64_t>(nz);
-        if (axis == 0u) return dim3(ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z));
-        if (axis == 1u) return dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z));
-        return dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z));
     }
 
     __global__ void reset_pressure_anchor_kernel(int* pressure_anchor, const int value) {
@@ -349,25 +311,28 @@ namespace kfs::cuda::operators::projection {
     }
 
     void find_pressure_anchor(cudaStream_t stream, int* pressure_anchor, const std::uint8_t* occupancy, const std::uint64_t count) {
-        const unsigned block = linear_block();
-        const unsigned grid  = linear_launch_grid(count, block);
+        if (count == 0u) throw std::runtime_error{"Projection launch count must be positive"};
+        constexpr unsigned block = 256u;
+        const unsigned grid      = ceil_div_u32(count, block);
         find_pressure_anchor_kernel<<<grid, block, 0, stream>>>(pressure_anchor, occupancy, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"find_pressure_anchor_kernel: "} + cudaGetErrorString(status)};
     }
 
     void compute_pressure_rhs(cudaStream_t stream, float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint8_t* occupancy, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_pressure) {
-        const dim3 block = cell_block();
-        const dim3 grid  = scalar_launch_grid(nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_pressure_boundary(flow_types, flow_pressure);
         compute_pressure_rhs_kernel<<<grid, block, 0, stream>>>(rhs, velocity_x, velocity_y, velocity_z, occupancy, pressure_anchor, nx, ny, nz, h, dt, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_pressure_rhs_kernel: "} + cudaGetErrorString(status)};
     }
 
     void build_pressure_matrix(cudaStream_t stream, float* values, const int* row_offsets, const int* column_indices, const std::uint8_t* occupancy, const int* pressure_anchor, const int nx, const int ny, const int nz, const std::uint32_t* flow_types) {
-        require_resolution(nx, ny, nz);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
         const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        const unsigned block = linear_block();
-        const unsigned grid  = linear_launch_grid(count, block);
+        if (count == 0u) throw std::runtime_error{"Projection launch count must be positive"};
+        constexpr unsigned block = 256u;
+        const unsigned grid      = ceil_div_u32(count, block);
         const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
         build_pressure_matrix_kernel<<<grid, block, 0, stream>>>(values, row_offsets, column_indices, occupancy, pressure_anchor, nx, ny, nz, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"build_pressure_matrix_kernel: "} + cudaGetErrorString(status)};
@@ -385,8 +350,12 @@ namespace kfs::cuda::operators::projection {
 
     void project_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const float* pressure, const std::uint8_t* occupancy, const float* solid_velocity_component, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_velocity) {
         if (axis >= 3u) throw std::runtime_error{"project_staggered_component: axis must be 0, 1, or 2"};
-        const dim3 block = cell_block();
-        const dim3 grid  = staggered_launch_grid(axis, nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const auto nx64 = static_cast<std::uint64_t>(nx);
+        const auto ny64 = static_cast<std::uint64_t>(ny);
+        const auto nz64 = static_cast<std::uint64_t>(nz);
+        const dim3 grid = axis == 0u ? dim3(ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)) : axis == 1u ? dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)) : dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z));
         const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(flow_types, flow_velocity);
         if (axis == 0u) project_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, occupancy, solid_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 1u) project_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, occupancy, solid_velocity_component, nx, ny, nz, h, dt, boundary_config);

@@ -1,5 +1,4 @@
 #include "keyframe.inspector.h"
-
 #include <algorithm>
 #include <cfloat>
 #include <cstddef>
@@ -27,11 +26,11 @@ namespace kfs::cuda {
             __shared__ std::uint64_t block_nonzero[stats_block_size];
 
             const unsigned thread_index = threadIdx.x;
-            const auto value_index       = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(thread_index);
-            float minimum                = FLT_MAX;
-            float maximum                = -FLT_MAX;
-            double sum                   = 0.0;
-            std::uint64_t nonzero        = 0u;
+            const auto value_index      = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(thread_index);
+            float minimum               = FLT_MAX;
+            float maximum               = -FLT_MAX;
+            double sum                  = 0.0;
+            std::uint64_t nonzero       = 0u;
             if (value_index < count) {
                 const float value = values[value_index];
                 minimum           = value;

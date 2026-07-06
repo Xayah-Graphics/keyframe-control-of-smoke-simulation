@@ -3,7 +3,6 @@ module;
 
 #include "../keyframe.field.h"
 #include <cublas_v2.h>
-#include <cuda_runtime.h>
 #include <cusparse.h>
 
 module keyframe.operators.projection;
@@ -13,12 +12,6 @@ import keyframe.boundary;
 
 namespace kfs::operators {
     namespace {
-        constexpr std::array<std::int32_t, 3> empty_resolution{0, 0, 0};
-
-        void require_resolution(const std::array<std::int32_t, 3> resolution) {
-            if (resolution[0] <= 0 || resolution[1] <= 0 || resolution[2] <= 0) throw std::runtime_error{"Projection resolution must be positive"};
-        }
-
         std::uint64_t cell_count(const std::array<std::int32_t, 3> resolution) {
             return static_cast<std::uint64_t>(resolution[0]) * static_cast<std::uint64_t>(resolution[1]) * static_cast<std::uint64_t>(resolution[2]);
         }
@@ -54,30 +47,11 @@ namespace kfs::operators {
             add_pressure_column(row_columns, row_entry_count, static_cast<int>(index_3d(next_x, next_y, next_z, nx, ny)));
         }
 
-        void require_staggered_component(const field::StaggeredVectorField3D& values, const std::uint32_t axis, const char* name) {
-            if (axis >= 3u) throw std::runtime_error{"Projection axis must be 0, 1, or 2"};
-            if (values.resolution == empty_resolution || values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
-        }
-
-        void require_staggered_field(const field::StaggeredVectorField3D& values, const char* name) {
-            for (std::uint32_t axis = 0u; axis < 3u; ++axis) require_staggered_component(values, axis, name);
-        }
-
-        void require_centered_field(const field::CenteredVectorField3D& values, const char* name) {
-            if (values.resolution == empty_resolution || values.count() == 0u) throw std::runtime_error{std::string{name} + " field is empty"};
-            for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-                if (values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
-            }
-        }
-
-        void require_delta_seconds(const float delta_seconds) {
-            if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0f) throw std::runtime_error{"Projection delta_seconds must be positive"};
-        }
     } // namespace
 
     Projection::Projection(const cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const std::int32_t pressure_iterations, const boundary::PackedFlowBoundary& boundary) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_iterations{pressure_iterations}, flow_boundary{boundary} {
         if (stream == nullptr) throw std::runtime_error{"Projection stream must not be null"};
-        require_resolution(resolution);
+        if (resolution[0] <= 0 || resolution[1] <= 0 || resolution[2] <= 0) throw std::runtime_error{"Projection resolution must be positive"};
         const std::uint64_t cells64 = cell_count(resolution);
         if (cells64 > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) throw std::runtime_error{"Projection cell count exceeds cuBLAS int range"};
         if (cells64 > static_cast<std::uint64_t>(std::numeric_limits<int>::max() / 7)) throw std::runtime_error{"Projection pressure matrix may exceed cuSPARSE int range"};
@@ -104,7 +78,7 @@ namespace kfs::operators {
         const int ny                = this->resolution[1];
         const int nz                = this->resolution[2];
 
-        std::vector<int> host_row_offsets(static_cast<std::size_t>(cells) + 1u, 0);
+        std::vector host_row_offsets(static_cast<std::size_t>(cells) + 1u, 0);
         std::vector<int> host_column_indices{};
         host_column_indices.reserve(static_cast<std::size_t>(cells) * 7u);
 
@@ -203,18 +177,22 @@ namespace kfs::operators {
 
     void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& solid_velocity, const std::uint8_t* occupancy, const float delta_seconds) {
         if (destination.resolution != this->resolution || working.resolution != this->resolution || solid_velocity.resolution != this->resolution) throw std::runtime_error{"Projection field resolution mismatch"};
-        require_staggered_field(destination, "destination");
-        require_staggered_field(working, "working");
-        require_centered_field(solid_velocity, "solid_velocity");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
+            if (destination.count(axis) == 0u || destination.data[axis] == nullptr) throw std::runtime_error{"destination field component is empty"};
+            if (working.count(axis) == 0u || working.data[axis] == nullptr) throw std::runtime_error{"working field component is empty"};
+        }
+        if (solid_velocity.count() == 0u) throw std::runtime_error{"solid_velocity field is empty"};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (solid_velocity.data[axis] == nullptr) throw std::runtime_error{"solid_velocity field component is empty"};
         if (occupancy == nullptr) throw std::runtime_error{"Projection occupancy must not be null"};
-        require_delta_seconds(delta_seconds);
+        if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0f) throw std::runtime_error{"Projection delta_seconds must be positive"};
 
-        const std::uint64_t cells64 = cell_count(this->resolution);
-        const int cells             = static_cast<int>(cells64);
-        const std::size_t bytes     = cell_bytes(this->resolution);
-        const int nx                = this->resolution[0];
-        const int ny                = this->resolution[1];
-        const int nz                = this->resolution[2];
+        const std::uint64_t cells64     = cell_count(this->resolution);
+        const int cells                 = static_cast<int>(cells64);
+        const std::size_t bytes         = cell_bytes(this->resolution);
+        const int nx                    = this->resolution[0];
+        const int ny                    = this->resolution[1];
+        const int nz                    = this->resolution[2];
         const std::uint32_t* flow_types = this->flow_boundary.types.data();
         const float* flow_velocity      = this->flow_boundary.velocity.data();
         const float* flow_pressure      = this->flow_boundary.pressure.data();

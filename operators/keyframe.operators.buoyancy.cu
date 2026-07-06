@@ -8,19 +8,6 @@ namespace kfs::cuda::operators::buoyancy {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
     }
 
-    dim3 cell_block() {
-        return dim3{8u, 8u, 4u};
-    }
-
-    void require_resolution(const int nx, const int ny, const int nz) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Buoyancy launch resolution must be positive"};
-    }
-
-    dim3 cell_grid(const int nx, const int ny, const int nz, const dim3& block) {
-        require_resolution(nx, ny, nz);
-        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
-    }
-
     __global__ void add_buoyancy_kernel(float* force_y, const float* density, const float* temperature, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float ambient_temperature, const float density_factor, const float temperature_factor, const boundary::FlowBoundary boundary_config) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -32,8 +19,9 @@ namespace kfs::cuda::operators::buoyancy {
     }
 
     void add_buoyancy(cudaStream_t stream, float* force_y, const float* density, const float* temperature, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float ambient_temperature, const float density_factor, const float temperature_factor, const std::uint32_t* flow_types) {
-        const dim3 block = cell_block();
-        const dim3 grid  = cell_grid(nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Buoyancy launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
         add_buoyancy_kernel<<<grid, block, 0, stream>>>(force_y, density, temperature, occupancy, nx, ny, nz, ambient_temperature, density_factor, temperature_factor, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_buoyancy_kernel: "} + cudaGetErrorString(status)};

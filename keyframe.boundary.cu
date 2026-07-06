@@ -1,47 +1,10 @@
 #include "keyframe.boundary.h"
-#include <cstdlib>
 #include <stdexcept>
 #include <string>
 
 namespace kfs::cuda::boundary {
     unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
-    }
-
-    dim3 cell_block() {
-        return dim3{8u, 8u, 4u};
-    }
-
-    dim3 sync_velocity_block() {
-        return dim3{8u, 8u, 1u};
-    }
-
-    void require_resolution(const int nx, const int ny, const int nz) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
-    }
-
-    dim3 scalar_launch_grid(const int nx, const int ny, const int nz, const dim3& block) {
-        require_resolution(nx, ny, nz);
-        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
-    }
-
-    dim3 staggered_launch_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3& block) {
-        if (axis >= 3u) throw std::runtime_error{"Boundary staggered launch axis must be 0, 1, or 2"};
-        require_resolution(nx, ny, nz);
-        const auto nx64 = static_cast<std::uint64_t>(nx);
-        const auto ny64 = static_cast<std::uint64_t>(ny);
-        const auto nz64 = static_cast<std::uint64_t>(nz);
-        if (axis == 0u) return dim3{ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)};
-        if (axis == 1u) return dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)};
-        return dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z)};
-    }
-
-    dim3 sync_velocity_launch_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3& block) {
-        if (axis >= 3u) throw std::runtime_error{"Boundary sync launch axis must be 0, 1, or 2"};
-        require_resolution(nx, ny, nz);
-        if (axis == 0u) return dim3{ceil_div_u32(static_cast<std::uint64_t>(ny), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u};
-        if (axis == 1u) return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u};
-        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), 1u};
     }
 
     __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint8_t* occupancy, const float* solid_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
@@ -272,8 +235,12 @@ namespace kfs::cuda::boundary {
 
     void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint8_t* occupancy, const float* solid_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
         if (axis >= 3u) throw std::runtime_error{"enforce_staggered_boundary: axis must be 0, 1, or 2"};
-        const dim3 block = cell_block();
-        const dim3 grid  = staggered_launch_grid(axis, nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const auto nx64             = static_cast<std::uint64_t>(nx);
+        const auto ny64             = static_cast<std::uint64_t>(ny);
+        const auto nz64             = static_cast<std::uint64_t>(nz);
+        const dim3 grid             = axis == 0u ? dim3{ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)} : axis == 1u ? dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)} : dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z)};
         const FlowBoundary boundary = make_flow_velocity_boundary(flow_types, flow_velocity);
         if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
         if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
@@ -283,8 +250,9 @@ namespace kfs::cuda::boundary {
 
     void sync_periodic_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const int nx, const int ny, const int nz) {
         if (axis >= 3u) throw std::runtime_error{"sync_periodic_staggered_component: axis must be 0, 1, or 2"};
-        const dim3 block = sync_velocity_block();
-        const dim3 grid  = sync_velocity_launch_grid(axis, nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 1u};
+        const dim3 grid = axis == 0u ? dim3{ceil_div_u32(static_cast<std::uint64_t>(ny), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u} : axis == 1u ? dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u} : dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), 1u};
         if (axis == 0u) sync_periodic_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
         if (axis == 1u) sync_periodic_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
         if (axis == 2u) sync_periodic_velocity_z_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
@@ -292,8 +260,9 @@ namespace kfs::cuda::boundary {
     }
 
     void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
-        const dim3 block = cell_block();
-        const dim3 grid  = scalar_launch_grid(nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const ScalarBoundary boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
         boundary_fill_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, occupancy, nx, ny, nz, boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary_fill_centered_scalar_kernel: "} + cudaGetErrorString(status)};

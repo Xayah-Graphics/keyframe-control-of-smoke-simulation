@@ -175,16 +175,22 @@ namespace kfs::cuda::boundary {
 
     __device__ inline float load_flow_cell(const float* field, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         if (x < 0 || x >= nx) {
-            if (flow_periodic_pair(boundary, 0u) && nx > 0) x = wrap_index(x, nx);
-            else x = x < 0 ? 0 : nx - 1;
+            if (flow_periodic_pair(boundary, 0u) && nx > 0)
+                x = wrap_index(x, nx);
+            else
+                x = x < 0 ? 0 : nx - 1;
         }
         if (y < 0 || y >= ny) {
-            if (flow_periodic_pair(boundary, 1u) && ny > 0) y = wrap_index(y, ny);
-            else y = y < 0 ? 0 : ny - 1;
+            if (flow_periodic_pair(boundary, 1u) && ny > 0)
+                y = wrap_index(y, ny);
+            else
+                y = y < 0 ? 0 : ny - 1;
         }
         if (z < 0 || z >= nz) {
-            if (flow_periodic_pair(boundary, 2u) && nz > 0) z = wrap_index(z, nz);
-            else z = z < 0 ? 0 : nz - 1;
+            if (flow_periodic_pair(boundary, 2u) && nz > 0)
+                z = wrap_index(z, nz);
+            else
+                z = z < 0 ? 0 : nz - 1;
         }
         return field[index_3d(x, y, z, nx, ny)];
     }

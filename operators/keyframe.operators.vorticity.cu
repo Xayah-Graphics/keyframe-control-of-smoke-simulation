@@ -1,25 +1,11 @@
-#include "keyframe.operators.vorticity.h"
 #include "../keyframe.boundary.h"
-#include <cmath>
+#include "keyframe.operators.vorticity.h"
 #include <stdexcept>
 #include <string>
 
 namespace kfs::cuda::operators::vorticity {
     unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
-    }
-
-    dim3 cell_block() {
-        return dim3{8u, 8u, 4u};
-    }
-
-    void require_resolution(const int nx, const int ny, const int nz) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Vorticity launch resolution must be positive"};
-    }
-
-    dim3 cell_grid(const int nx, const int ny, const int nz, const dim3& block) {
-        require_resolution(nx, ny, nz);
-        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
     }
 
     __global__ void compute_vorticity_kernel(float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const boundary::FlowBoundary boundary_config) {
@@ -85,16 +71,18 @@ namespace kfs::cuda::operators::vorticity {
     }
 
     void compute_vorticity(cudaStream_t stream, float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t* flow_types, const float* flow_velocity) {
-        const dim3 block = cell_block();
-        const dim3 grid  = cell_grid(nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Vorticity launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(flow_types, flow_velocity);
         compute_vorticity_kernel<<<grid, block, 0, stream>>>(omega_x, omega_y, omega_z, omega_magnitude, velocity_x, velocity_y, velocity_z, occupancy, nx, ny, nz, cell_size, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_vorticity_kernel: "} + cudaGetErrorString(status)};
     }
 
     void add_confinement(cudaStream_t stream, float* force_x, float* force_y, float* force_z, const float* omega_x, const float* omega_y, const float* omega_z, const float* omega_magnitude, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float cell_size, const float confinement, const std::uint32_t* flow_types) {
-        const dim3 block = cell_block();
-        const dim3 grid  = cell_grid(nx, ny, nz, block);
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Vorticity launch resolution must be positive"};
+        constexpr dim3 block{8u, 8u, 4u};
+        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
         add_confinement_kernel<<<grid, block, 0, stream>>>(force_x, force_y, force_z, omega_x, omega_y, omega_z, omega_magnitude, occupancy, nx, ny, nz, cell_size, confinement, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_confinement_kernel: "} + cudaGetErrorString(status)};

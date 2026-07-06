@@ -1,5 +1,4 @@
 #include "keyframe.field.h"
-
 #include <array>
 #include <cstdint>
 #include <cuda_runtime.h>

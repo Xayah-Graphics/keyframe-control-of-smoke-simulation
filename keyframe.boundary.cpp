@@ -7,8 +7,6 @@ import keyframe.field;
 
 namespace kfs::boundary {
     namespace {
-        constexpr std::array<std::int32_t, 3> empty_resolution{0, 0, 0};
-
         bool paired_periodic(const FlowBoundaryFace& minus_face, const FlowBoundaryFace& plus_face) {
             return (minus_face.type == FlowBoundaryType::periodic) == (plus_face.type == FlowBoundaryType::periodic);
         }
@@ -34,11 +32,11 @@ namespace kfs::boundary {
         }
 
         void write_flow_face(const std::size_t index, const FlowBoundaryFace& face, PackedFlowBoundary& packed) {
-            packed.types[index]                 = static_cast<std::uint32_t>(face.type);
-            packed.velocity[index * 3u + 0u]    = face.velocity_x;
-            packed.velocity[index * 3u + 1u]    = face.velocity_y;
-            packed.velocity[index * 3u + 2u]    = face.velocity_z;
-            packed.pressure[index]              = face.pressure;
+            packed.types[index]              = static_cast<std::uint32_t>(face.type);
+            packed.velocity[index * 3u + 0u] = face.velocity_x;
+            packed.velocity[index * 3u + 1u] = face.velocity_y;
+            packed.velocity[index * 3u + 2u] = face.velocity_z;
+            packed.pressure[index]           = face.pressure;
         }
 
         void write_scalar_face(const std::size_t index, const ScalarBoundaryFace& face, PackedScalarBoundary& packed) {
@@ -70,29 +68,6 @@ namespace kfs::boundary {
             return packed;
         }
 
-        void require_stream(const cudaStream_t stream) {
-            if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
-        }
-
-        void require_axis(const std::uint32_t axis) {
-            if (axis >= 3u) throw std::runtime_error{"Boundary axis must be 0, 1, or 2"};
-        }
-
-        void require_staggered_component(const field::StaggeredVectorField3D& values, const std::uint32_t axis, const char* name) {
-            require_axis(axis);
-            if (values.resolution == empty_resolution || values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
-        }
-
-        void require_centered_field(const field::CenteredVectorField3D& values, const char* name) {
-            if (values.resolution == empty_resolution || values.count() == 0u) throw std::runtime_error{std::string{name} + " field is empty"};
-            for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-                if (values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
-            }
-        }
-
-        void require_scalar_field(const field::ScalarField3D& values, const char* name) {
-            if (values.resolution == empty_resolution || values.count() == 0u || values.data == nullptr) throw std::runtime_error{std::string{name} + " field is empty"};
-        }
     } // namespace
 
     void validate(const DomainBoundary& boundary) {
@@ -111,25 +86,29 @@ namespace kfs::boundary {
     }
 
     void enforce_staggered_boundary(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values, const std::uint8_t* occupancy, const field::CenteredVectorField3D& solid_velocity, const PackedFlowBoundary& boundary) {
-        require_stream(stream);
+        if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
+        if (axis >= 3u) throw std::runtime_error{"Boundary axis must be 0, 1, or 2"};
         if (values.resolution != solid_velocity.resolution) throw std::runtime_error{"Boundary staggered and solid velocity resolution mismatch"};
-        require_staggered_component(values, axis, "velocity");
-        require_centered_field(solid_velocity, "solid_velocity");
+        if (values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{"velocity field component is empty"};
+        if (solid_velocity.count() == 0u) throw std::runtime_error{"solid_velocity field is empty"};
+        for (std::uint32_t solid_axis = 0u; solid_axis < 3u; ++solid_axis)
+            if (solid_velocity.data[solid_axis] == nullptr) throw std::runtime_error{"solid_velocity field component is empty"};
         if (occupancy == nullptr) throw std::runtime_error{"Boundary occupancy must not be null"};
         cuda::boundary::enforce_staggered_boundary(stream, axis, values.data[axis], occupancy, solid_velocity.data[axis], values.resolution[0], values.resolution[1], values.resolution[2], boundary.types.data(), boundary.velocity.data());
     }
 
     void sync_periodic_staggered_component(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values) {
-        require_stream(stream);
-        require_staggered_component(values, axis, "velocity");
+        if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
+        if (axis >= 3u) throw std::runtime_error{"Boundary axis must be 0, 1, or 2"};
+        if (values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{"velocity field component is empty"};
         cuda::boundary::sync_periodic_staggered_component(stream, axis, values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2]);
     }
 
     void boundary_fill_centered_scalar(const cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const std::uint8_t* occupancy, const PackedScalarBoundary& boundary) {
-        require_stream(stream);
+        if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
         if (destination.resolution != source.resolution) throw std::runtime_error{"Boundary scalar field resolution mismatch"};
-        require_scalar_field(destination, "destination");
-        require_scalar_field(source, "source");
+        if (destination.count() == 0u || destination.data == nullptr) throw std::runtime_error{"destination field is empty"};
+        if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
         if (occupancy == nullptr) throw std::runtime_error{"Boundary occupancy must not be null"};
         cuda::boundary::boundary_fill_centered_scalar(stream, destination.data, source.data, occupancy, destination.resolution[0], destination.resolution[1], destination.resolution[2], boundary.types.data(), boundary.values.data());
     }
