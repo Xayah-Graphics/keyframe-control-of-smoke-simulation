@@ -6,6 +6,17 @@
 #include <stdexcept>
 #include <string>
 
+namespace kfs::cuda {
+    void free_device_buffers(void** const pointers, const std::size_t count) noexcept {
+        if (pointers == nullptr) return;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (pointers[i] == nullptr) continue;
+            cudaFree(pointers[i]);
+            pointers[i] = nullptr;
+        }
+    }
+} // namespace kfs::cuda
+
 namespace kfs::cuda::field {
     namespace {
         unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {

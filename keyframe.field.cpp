@@ -5,17 +5,6 @@ module;
 module keyframe.field;
 import std;
 
-namespace kfs::cuda {
-    void free_device_buffers(void** const pointers, const std::size_t count) noexcept {
-        if (pointers == nullptr) return;
-        for (std::size_t i = 0; i < count; ++i) {
-            if (pointers[i] == nullptr) continue;
-            cudaFree(pointers[i]);
-            pointers[i] = nullptr;
-        }
-    }
-} // namespace kfs::cuda
-
 namespace kfs::field {
     namespace {
         constexpr std::array<std::int32_t, 3> empty_resolution{0, 0, 0};
