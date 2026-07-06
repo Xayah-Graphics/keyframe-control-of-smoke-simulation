@@ -9,11 +9,11 @@ module;
 module keyframe.operators.projection;
 import std;
 import keyframe.field;
+import keyframe.boundary;
 
 namespace kfs::operators {
     namespace {
         constexpr std::array<std::int32_t, 3> empty_resolution{0, 0, 0};
-        constexpr std::uint32_t flow_boundary_periodic = 3u;
 
         void require_resolution(const std::array<std::int32_t, 3> resolution) {
             if (resolution[0] <= 0 || resolution[1] <= 0 || resolution[2] <= 0) throw std::runtime_error{"Projection resolution must be positive"};
@@ -54,10 +54,6 @@ namespace kfs::operators {
             add_pressure_column(row_columns, row_entry_count, static_cast<int>(index_3d(next_x, next_y, next_z, nx, ny)));
         }
 
-        void require_boundary_arrays(const std::uint32_t* types, const float* velocity, const float* pressure) {
-            if (types == nullptr || velocity == nullptr || pressure == nullptr) throw std::runtime_error{"Projection flow boundary arrays must not be null"};
-        }
-
         void require_staggered_component(const field::StaggeredVectorField3D& values, const std::uint32_t axis, const char* name) {
             if (axis >= 3u) throw std::runtime_error{"Projection axis must be 0, 1, or 2"};
             if (values.resolution == empty_resolution || values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
@@ -79,7 +75,7 @@ namespace kfs::operators {
         }
     } // namespace
 
-    Projection::Projection(const cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const std::int32_t pressure_iterations, const std::uint32_t* flow_boundary_types, const float* flow_boundary_velocity, const float* flow_boundary_pressure) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_iterations{pressure_iterations} {
+    Projection::Projection(const cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const std::int32_t pressure_iterations, const boundary::PackedFlowBoundary& boundary) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_iterations{pressure_iterations}, flow_boundary{boundary} {
         if (stream == nullptr) throw std::runtime_error{"Projection stream must not be null"};
         require_resolution(resolution);
         const std::uint64_t cells64 = cell_count(resolution);
@@ -87,15 +83,6 @@ namespace kfs::operators {
         if (cells64 > static_cast<std::uint64_t>(std::numeric_limits<int>::max() / 7)) throw std::runtime_error{"Projection pressure matrix may exceed cuSPARSE int range"};
         if (!std::isfinite(cell_size) || cell_size <= 0.0f) throw std::runtime_error{"Projection cell_size must be positive"};
         if (pressure_iterations <= 0) throw std::runtime_error{"Projection pressure_iterations must be positive"};
-        require_boundary_arrays(flow_boundary_types, flow_boundary_velocity, flow_boundary_pressure);
-        for (std::size_t index = 0u; index < this->flow_boundary_types.size(); ++index) this->flow_boundary_types[index] = flow_boundary_types[index];
-        for (std::size_t index = 0u; index < this->flow_boundary_velocity.size(); ++index) this->flow_boundary_velocity[index] = flow_boundary_velocity[index];
-        for (std::size_t index = 0u; index < this->flow_boundary_pressure.size(); ++index) this->flow_boundary_pressure[index] = flow_boundary_pressure[index];
-        this->periodic = {
-            this->flow_boundary_types[0] == flow_boundary_periodic && this->flow_boundary_types[1] == flow_boundary_periodic,
-            this->flow_boundary_types[2] == flow_boundary_periodic && this->flow_boundary_types[3] == flow_boundary_periodic,
-            this->flow_boundary_types[4] == flow_boundary_periodic && this->flow_boundary_types[5] == flow_boundary_periodic,
-        };
 
         try {
             this->initialize();
@@ -129,12 +116,12 @@ namespace kfs::operators {
             const int z                                     = yz / ny;
             std::array<int, 7> row_columns{};
             int row_entry_count = 0;
-            add_pressure_neighbor(row_columns, row_entry_count, x - 1, y, z, this->periodic[0], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x + 1, y, z, this->periodic[0], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y - 1, z, this->periodic[1], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y + 1, z, this->periodic[1], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y, z - 1, this->periodic[2], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y, z + 1, this->periodic[2], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x - 1, y, z, this->flow_boundary.periodic[0], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x + 1, y, z, this->flow_boundary.periodic[0], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y - 1, z, this->flow_boundary.periodic[1], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y + 1, z, this->flow_boundary.periodic[1], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y, z - 1, this->flow_boundary.periodic[2], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y, z + 1, this->flow_boundary.periodic[2], nx, ny, nz);
             add_pressure_column(row_columns, row_entry_count, row);
             for (int left = 0; left < row_entry_count; ++left) {
                 for (int right = left + 1; right < row_entry_count; ++right) {
@@ -228,9 +215,9 @@ namespace kfs::operators {
         const int nx                = this->resolution[0];
         const int ny                = this->resolution[1];
         const int nz                = this->resolution[2];
-        const std::uint32_t* flow_types = this->flow_boundary_types.data();
-        const float* flow_velocity      = this->flow_boundary_velocity.data();
-        const float* flow_pressure      = this->flow_boundary_pressure.data();
+        const std::uint32_t* flow_types = this->flow_boundary.types.data();
+        const float* flow_velocity      = this->flow_boundary.velocity.data();
+        const float* flow_pressure      = this->flow_boundary.pressure.data();
         cuda::operators::projection::reset_pressure_anchor(this->stream, this->pressure_anchor, cells);
         cuda::operators::projection::find_pressure_anchor(this->stream, this->pressure_anchor, occupancy, cells64);
         cuda::operators::projection::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], occupancy, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_pressure);
@@ -257,8 +244,8 @@ namespace kfs::operators {
 
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
             cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, occupancy, solid_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_velocity);
-            cuda::operators::projection::enforce_staggered_boundary(this->stream, axis, working.data[axis], occupancy, solid_velocity.data[axis], nx, ny, nz, flow_types, flow_velocity);
-            if (this->periodic[axis]) cuda::operators::projection::sync_periodic_staggered_component(this->stream, axis, working.data[axis], nx, ny, nz);
+            boundary::enforce_staggered_boundary(this->stream, axis, working, occupancy, solid_velocity, this->flow_boundary);
+            if (this->flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(this->stream, axis, working);
             field::copy_staggered_component(this->stream, destination, axis, working);
         }
     }

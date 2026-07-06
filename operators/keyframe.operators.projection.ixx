@@ -6,10 +6,11 @@ module;
 export module keyframe.operators.projection;
 import std;
 import keyframe.field;
+import keyframe.boundary;
 
 export namespace kfs::operators {
     struct Projection final {
-        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, std::int32_t pressure_iterations, const std::uint32_t* flow_boundary_types, const float* flow_boundary_velocity, const float* flow_boundary_pressure);
+        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, std::int32_t pressure_iterations, const boundary::PackedFlowBoundary& boundary);
         ~Projection() noexcept;
         Projection(const Projection&)                = delete;
         Projection& operator=(const Projection&)     = delete;
@@ -26,10 +27,7 @@ export namespace kfs::operators {
         std::array<std::int32_t, 3> resolution{0, 0, 0};
         float cell_size{0.0f};
         std::int32_t pressure_iterations{0};
-        std::array<std::uint32_t, 6> flow_boundary_types{};
-        std::array<float, 18> flow_boundary_velocity{};
-        std::array<float, 6> flow_boundary_pressure{};
-        std::array<bool, 3> periodic{};
+        boundary::PackedFlowBoundary flow_boundary{};
 
         cublasHandle_t cublas{nullptr};
         cusparseHandle_t cusparse{nullptr};

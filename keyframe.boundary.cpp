@@ -1,0 +1,136 @@
+module;
+#include "keyframe.boundary.h"
+
+module keyframe.boundary;
+import std;
+import keyframe.field;
+
+namespace kfs::boundary {
+    namespace {
+        constexpr std::array<std::int32_t, 3> empty_resolution{0, 0, 0};
+
+        bool paired_periodic(const FlowBoundaryFace& minus_face, const FlowBoundaryFace& plus_face) {
+            return (minus_face.type == FlowBoundaryType::periodic) == (plus_face.type == FlowBoundaryType::periodic);
+        }
+
+        bool paired_periodic(const ScalarBoundaryFace& minus_face, const ScalarBoundaryFace& plus_face) {
+            return (minus_face.type == ScalarBoundaryType::periodic) == (plus_face.type == ScalarBoundaryType::periodic);
+        }
+
+        std::array<bool, 3> flow_periodic_axes(const FlowBoundary& boundary) {
+            return {
+                boundary.x_minus.type == FlowBoundaryType::periodic && boundary.x_plus.type == FlowBoundaryType::periodic,
+                boundary.y_minus.type == FlowBoundaryType::periodic && boundary.y_plus.type == FlowBoundaryType::periodic,
+                boundary.z_minus.type == FlowBoundaryType::periodic && boundary.z_plus.type == FlowBoundaryType::periodic,
+            };
+        }
+
+        std::array<bool, 3> scalar_periodic_axes(const ScalarBoundary& boundary) {
+            return {
+                boundary.x_minus.type == ScalarBoundaryType::periodic && boundary.x_plus.type == ScalarBoundaryType::periodic,
+                boundary.y_minus.type == ScalarBoundaryType::periodic && boundary.y_plus.type == ScalarBoundaryType::periodic,
+                boundary.z_minus.type == ScalarBoundaryType::periodic && boundary.z_plus.type == ScalarBoundaryType::periodic,
+            };
+        }
+
+        void write_flow_face(const std::size_t index, const FlowBoundaryFace& face, PackedFlowBoundary& packed) {
+            packed.types[index]                 = static_cast<std::uint32_t>(face.type);
+            packed.velocity[index * 3u + 0u]    = face.velocity_x;
+            packed.velocity[index * 3u + 1u]    = face.velocity_y;
+            packed.velocity[index * 3u + 2u]    = face.velocity_z;
+            packed.pressure[index]              = face.pressure;
+        }
+
+        void write_scalar_face(const std::size_t index, const ScalarBoundaryFace& face, PackedScalarBoundary& packed) {
+            packed.types[index]  = static_cast<std::uint32_t>(face.type);
+            packed.values[index] = face.value;
+        }
+
+        PackedFlowBoundary pack_flow_boundary(const FlowBoundary& boundary) {
+            PackedFlowBoundary packed{};
+            write_flow_face(0u, boundary.x_minus, packed);
+            write_flow_face(1u, boundary.x_plus, packed);
+            write_flow_face(2u, boundary.y_minus, packed);
+            write_flow_face(3u, boundary.y_plus, packed);
+            write_flow_face(4u, boundary.z_minus, packed);
+            write_flow_face(5u, boundary.z_plus, packed);
+            packed.periodic = flow_periodic_axes(boundary);
+            return packed;
+        }
+
+        PackedScalarBoundary pack_scalar_boundary(const ScalarBoundary& boundary) {
+            PackedScalarBoundary packed{};
+            write_scalar_face(0u, boundary.x_minus, packed);
+            write_scalar_face(1u, boundary.x_plus, packed);
+            write_scalar_face(2u, boundary.y_minus, packed);
+            write_scalar_face(3u, boundary.y_plus, packed);
+            write_scalar_face(4u, boundary.z_minus, packed);
+            write_scalar_face(5u, boundary.z_plus, packed);
+            packed.periodic = scalar_periodic_axes(boundary);
+            return packed;
+        }
+
+        void require_stream(const cudaStream_t stream) {
+            if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
+        }
+
+        void require_axis(const std::uint32_t axis) {
+            if (axis >= 3u) throw std::runtime_error{"Boundary axis must be 0, 1, or 2"};
+        }
+
+        void require_staggered_component(const field::StaggeredVectorField3D& values, const std::uint32_t axis, const char* name) {
+            require_axis(axis);
+            if (values.resolution == empty_resolution || values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
+        }
+
+        void require_centered_field(const field::CenteredVectorField3D& values, const char* name) {
+            if (values.resolution == empty_resolution || values.count() == 0u) throw std::runtime_error{std::string{name} + " field is empty"};
+            for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
+                if (values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
+            }
+        }
+
+        void require_scalar_field(const field::ScalarField3D& values, const char* name) {
+            if (values.resolution == empty_resolution || values.count() == 0u || values.data == nullptr) throw std::runtime_error{std::string{name} + " field is empty"};
+        }
+    } // namespace
+
+    void validate(const DomainBoundary& boundary) {
+        if (!paired_periodic(boundary.flow.x_minus, boundary.flow.x_plus) || !paired_periodic(boundary.flow.y_minus, boundary.flow.y_plus) || !paired_periodic(boundary.flow.z_minus, boundary.flow.z_plus)) throw std::runtime_error{"Keyframe smoke flow periodic boundaries must be paired"};
+        if (!paired_periodic(boundary.density.x_minus, boundary.density.x_plus) || !paired_periodic(boundary.density.y_minus, boundary.density.y_plus) || !paired_periodic(boundary.density.z_minus, boundary.density.z_plus)) throw std::runtime_error{"Keyframe smoke density periodic boundaries must be paired"};
+        if (!paired_periodic(boundary.temperature.x_minus, boundary.temperature.x_plus) || !paired_periodic(boundary.temperature.y_minus, boundary.temperature.y_plus) || !paired_periodic(boundary.temperature.z_minus, boundary.temperature.z_plus)) throw std::runtime_error{"Keyframe smoke temperature periodic boundaries must be paired"};
+    }
+
+    PackedDomainBoundary pack(const DomainBoundary& boundary) {
+        validate(boundary);
+        return PackedDomainBoundary{
+            .flow        = pack_flow_boundary(boundary.flow),
+            .density     = pack_scalar_boundary(boundary.density),
+            .temperature = pack_scalar_boundary(boundary.temperature),
+        };
+    }
+
+    void enforce_staggered_boundary(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values, const std::uint8_t* occupancy, const field::CenteredVectorField3D& solid_velocity, const PackedFlowBoundary& boundary) {
+        require_stream(stream);
+        if (values.resolution != solid_velocity.resolution) throw std::runtime_error{"Boundary staggered and solid velocity resolution mismatch"};
+        require_staggered_component(values, axis, "velocity");
+        require_centered_field(solid_velocity, "solid_velocity");
+        if (occupancy == nullptr) throw std::runtime_error{"Boundary occupancy must not be null"};
+        cuda::boundary::enforce_staggered_boundary(stream, axis, values.data[axis], occupancy, solid_velocity.data[axis], values.resolution[0], values.resolution[1], values.resolution[2], boundary.types.data(), boundary.velocity.data());
+    }
+
+    void sync_periodic_staggered_component(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values) {
+        require_stream(stream);
+        require_staggered_component(values, axis, "velocity");
+        cuda::boundary::sync_periodic_staggered_component(stream, axis, values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2]);
+    }
+
+    void boundary_fill_centered_scalar(const cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const std::uint8_t* occupancy, const PackedScalarBoundary& boundary) {
+        require_stream(stream);
+        if (destination.resolution != source.resolution) throw std::runtime_error{"Boundary scalar field resolution mismatch"};
+        require_scalar_field(destination, "destination");
+        require_scalar_field(source, "source");
+        if (occupancy == nullptr) throw std::runtime_error{"Boundary occupancy must not be null"};
+        cuda::boundary::boundary_fill_centered_scalar(stream, destination.data, source.data, occupancy, destination.resolution[0], destination.resolution[1], destination.resolution[2], boundary.types.data(), boundary.values.data());
+    }
+} // namespace kfs::boundary

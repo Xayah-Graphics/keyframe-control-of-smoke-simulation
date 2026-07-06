@@ -4,54 +4,11 @@ module;
 export module keyframe.solver;
 import std;
 export import keyframe.field;
+export import keyframe.boundary;
 export import keyframe.operators.advection;
 import keyframe.operators.projection;
 
 namespace kfs::solver {
-    export enum class FlowBoundaryType : std::uint32_t {
-        no_slip_wall   = 0,
-        free_slip_wall = 1,
-        outflow        = 2,
-        periodic       = 3,
-    };
-
-    export enum class ScalarBoundaryType : std::uint32_t {
-        fixed_value = 0,
-        zero_flux   = 1,
-        periodic    = 2,
-    };
-
-    export struct FlowBoundaryFace final {
-        FlowBoundaryType type{FlowBoundaryType::no_slip_wall};
-        float velocity_x{0.0f};
-        float velocity_y{0.0f};
-        float velocity_z{0.0f};
-        float pressure{0.0f};
-    };
-
-    export struct FlowBoundary final {
-        FlowBoundaryFace x_minus{FlowBoundaryType::periodic};
-        FlowBoundaryFace x_plus{FlowBoundaryType::periodic};
-        FlowBoundaryFace y_minus{FlowBoundaryType::no_slip_wall};
-        FlowBoundaryFace y_plus{FlowBoundaryType::outflow};
-        FlowBoundaryFace z_minus{FlowBoundaryType::periodic};
-        FlowBoundaryFace z_plus{FlowBoundaryType::periodic};
-    };
-
-    export struct ScalarBoundaryFace final {
-        ScalarBoundaryType type{ScalarBoundaryType::fixed_value};
-        float value{0.0f};
-    };
-
-    export struct ScalarBoundary final {
-        ScalarBoundaryFace x_minus{ScalarBoundaryType::periodic, 0.0f};
-        ScalarBoundaryFace x_plus{ScalarBoundaryType::periodic, 0.0f};
-        ScalarBoundaryFace y_minus{ScalarBoundaryType::fixed_value, 0.0f};
-        ScalarBoundaryFace y_plus{ScalarBoundaryType::fixed_value, 0.0f};
-        ScalarBoundaryFace z_minus{ScalarBoundaryType::periodic, 0.0f};
-        ScalarBoundaryFace z_plus{ScalarBoundaryType::periodic, 0.0f};
-    };
-
     export struct Config final {
         std::array<std::uint32_t, 3> resolution{64, 96, 64};
         float cell_size{0.01875f};
@@ -61,9 +18,7 @@ namespace kfs::solver {
         float buoyancy_temperature_factor{1.2f};
         float vorticity_confinement{0.22f};
         operators::Advection::Scheme advection_scheme{operators::Advection::Scheme::monotonic_cubic};
-        FlowBoundary flow_boundary{};
-        ScalarBoundary density_boundary{};
-        ScalarBoundary temperature_boundary{};
+        boundary::DomainBoundary boundary{};
     };
 
     export struct PlumeSource final {
@@ -104,12 +59,7 @@ namespace kfs::solver {
             float buoyancy_density_factor{0.0f};
             float buoyancy_temperature_factor{0.0f};
             float vorticity_confinement{0.0f};
-            std::array<std::uint32_t, 6> flow_boundary_types{};
-            std::array<float, 18> flow_boundary_velocity{};
-            std::array<std::uint32_t, 6> density_boundary_types{};
-            std::array<float, 6> density_boundary_values{};
-            std::array<std::uint32_t, 6> temperature_boundary_types{};
-            std::array<float, 6> temperature_boundary_values{};
+            boundary::PackedDomainBoundary boundary{};
             cudaStream_t stream{nullptr};
             PlumeSource plume_source{};
             std::vector<float> density_source{};

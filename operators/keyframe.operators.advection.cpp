@@ -4,6 +4,7 @@ module;
 module keyframe.operators.advection;
 import std;
 import keyframe.field;
+import keyframe.boundary;
 
 namespace kfs::operators {
     namespace {
@@ -30,14 +31,6 @@ namespace kfs::operators {
             for (std::uint32_t axis = 0u; axis < 3u; ++axis) require_staggered_component(field, axis, name);
         }
 
-        void require_vector_boundary(const std::uint32_t* types, const float* values) {
-            if (types == nullptr || values == nullptr) throw std::runtime_error{"Advection vector boundary arrays must not be null"};
-        }
-
-        void require_scalar_boundary(const std::uint32_t* types, const float* values) {
-            if (types == nullptr || values == nullptr) throw std::runtime_error{"Advection scalar boundary arrays must not be null"};
-        }
-
         void require_delta_seconds(const float delta_seconds) {
             if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0f) throw std::runtime_error{"Advection delta_seconds must be positive"};
         }
@@ -49,26 +42,23 @@ namespace kfs::operators {
         raw_scheme(scheme);
     }
 
-    void Advection::operator()(field::StaggeredVectorField3D& destination, const std::uint32_t axis, const field::StaggeredVectorField3D& source, const field::StaggeredVectorField3D& vector_field, const std::uint8_t* cell_mask, const float delta_seconds, const std::uint32_t* boundary_types, const float* boundary_values) const {
+    void Advection::operator()(field::StaggeredVectorField3D& destination, const std::uint32_t axis, const field::StaggeredVectorField3D& source, const field::StaggeredVectorField3D& vector_field, const std::uint8_t* cell_mask, const float delta_seconds, const boundary::PackedFlowBoundary& boundary) const {
         if (destination.resolution != source.resolution || destination.resolution != vector_field.resolution) throw std::runtime_error{"Advection staggered field resolution mismatch"};
         require_staggered_component(destination, axis, "destination");
         require_staggered_component(source, axis, "source");
         require_staggered_field(vector_field, "vector");
         if (cell_mask == nullptr) throw std::runtime_error{"Advection cell mask must not be null"};
         require_delta_seconds(delta_seconds);
-        require_vector_boundary(boundary_types, boundary_values);
-        cuda::operators::advection::advect_staggered_component(this->stream, axis, destination.data[axis], source.data[axis], vector_field.data[0], vector_field.data[1], vector_field.data[2], cell_mask, destination.resolution[0], destination.resolution[1], destination.resolution[2], this->cell_size, delta_seconds, raw_scheme(this->scheme), boundary_types, boundary_values);
+        cuda::operators::advection::advect_staggered_component(this->stream, axis, destination.data[axis], source.data[axis], vector_field.data[0], vector_field.data[1], vector_field.data[2], cell_mask, destination.resolution[0], destination.resolution[1], destination.resolution[2], this->cell_size, delta_seconds, raw_scheme(this->scheme), boundary.types.data(), boundary.velocity.data());
     }
 
-    void Advection::operator()(field::ScalarField3D& destination, const field::ScalarField3D& source, const field::StaggeredVectorField3D& vector_field, const std::uint8_t* cell_mask, const float delta_seconds, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values, const std::uint32_t* vector_boundary_types, const float* vector_boundary_values) const {
+    void Advection::operator()(field::ScalarField3D& destination, const field::ScalarField3D& source, const field::StaggeredVectorField3D& vector_field, const std::uint8_t* cell_mask, const float delta_seconds, const boundary::PackedScalarBoundary& scalar_boundary, const boundary::PackedFlowBoundary& vector_boundary) const {
         if (destination.resolution != source.resolution || destination.resolution != vector_field.resolution) throw std::runtime_error{"Advection scalar field resolution mismatch"};
         require_scalar_field(destination, "destination");
         require_scalar_field(source, "source");
         require_staggered_field(vector_field, "vector");
         if (cell_mask == nullptr) throw std::runtime_error{"Advection cell mask must not be null"};
         require_delta_seconds(delta_seconds);
-        require_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
-        require_vector_boundary(vector_boundary_types, vector_boundary_values);
-        cuda::operators::advection::advect_centered_scalar(this->stream, destination.data, source.data, vector_field.data[0], vector_field.data[1], vector_field.data[2], cell_mask, destination.resolution[0], destination.resolution[1], destination.resolution[2], this->cell_size, delta_seconds, raw_scheme(this->scheme), scalar_boundary_types, scalar_boundary_values, vector_boundary_types, vector_boundary_values);
+        cuda::operators::advection::advect_centered_scalar(this->stream, destination.data, source.data, vector_field.data[0], vector_field.data[1], vector_field.data[2], cell_mask, destination.resolution[0], destination.resolution[1], destination.resolution[2], this->cell_size, delta_seconds, raw_scheme(this->scheme), scalar_boundary.types.data(), scalar_boundary.values.data(), vector_boundary.types.data(), vector_boundary.velocity.data());
     }
 } // namespace kfs::operators

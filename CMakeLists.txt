@@ -74,6 +74,9 @@ target_sources(
         keyframe.field.cu
         keyframe.field.cpp
         keyframe.field.h
+        keyframe.boundary.cpp
+        keyframe.boundary.cu
+        keyframe.boundary.h
         operators/keyframe.operators.advection.cpp
         operators/keyframe.operators.advection.cu
         operators/keyframe.operators.advection.h
@@ -89,6 +92,7 @@ target_sources(
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         keyframe.field.ixx
+        keyframe.boundary.ixx
         operators/keyframe.operators.advection.ixx
         operators/keyframe.operators.projection.ixx
         keyframe.solver.ixx

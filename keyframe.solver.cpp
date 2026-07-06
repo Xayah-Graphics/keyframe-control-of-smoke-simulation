@@ -7,72 +7,17 @@ module;
 module keyframe.solver;
 import std;
 import keyframe.field;
+import keyframe.boundary;
 import keyframe.operators.advection;
 import keyframe.operators.projection;
 
 namespace kfs::solver {
     namespace {
-        constexpr std::uint32_t flow_boundary_periodic = 3u;
-
-        void write_flow_face(const std::size_t index, const FlowBoundaryFace& face, std::array<std::uint32_t, 6>& types, std::array<float, 18>& velocity) {
-            types[index]              = static_cast<std::uint32_t>(face.type);
-            velocity[index * 3u + 0u] = face.velocity_x;
-            velocity[index * 3u + 1u] = face.velocity_y;
-            velocity[index * 3u + 2u] = face.velocity_z;
-        }
-
-        void write_flow_pressure_face(const std::size_t index, const FlowBoundaryFace& face, std::array<float, 6>& pressure) {
-            pressure[index] = face.pressure;
-        }
-
-        void write_scalar_face(const std::size_t index, const ScalarBoundaryFace& face, std::array<std::uint32_t, 6>& types, std::array<float, 6>& values) {
-            types[index]  = static_cast<std::uint32_t>(face.type);
-            values[index] = face.value;
-        }
-
-        void write_flow_boundary(const FlowBoundary& boundary, std::array<std::uint32_t, 6>& types, std::array<float, 18>& velocity) {
-            write_flow_face(0u, boundary.x_minus, types, velocity);
-            write_flow_face(1u, boundary.x_plus, types, velocity);
-            write_flow_face(2u, boundary.y_minus, types, velocity);
-            write_flow_face(3u, boundary.y_plus, types, velocity);
-            write_flow_face(4u, boundary.z_minus, types, velocity);
-            write_flow_face(5u, boundary.z_plus, types, velocity);
-        }
-
-        void write_flow_boundary_pressure(const FlowBoundary& boundary, std::array<float, 6>& pressure) {
-            write_flow_pressure_face(0u, boundary.x_minus, pressure);
-            write_flow_pressure_face(1u, boundary.x_plus, pressure);
-            write_flow_pressure_face(2u, boundary.y_minus, pressure);
-            write_flow_pressure_face(3u, boundary.y_plus, pressure);
-            write_flow_pressure_face(4u, boundary.z_minus, pressure);
-            write_flow_pressure_face(5u, boundary.z_plus, pressure);
-        }
-
-        void write_scalar_boundary(const ScalarBoundary& boundary, std::array<std::uint32_t, 6>& types, std::array<float, 6>& values) {
-            write_scalar_face(0u, boundary.x_minus, types, values);
-            write_scalar_face(1u, boundary.x_plus, types, values);
-            write_scalar_face(2u, boundary.y_minus, types, values);
-            write_scalar_face(3u, boundary.y_plus, types, values);
-            write_scalar_face(4u, boundary.z_minus, types, values);
-            write_scalar_face(5u, boundary.z_plus, types, values);
-        }
-
-        bool paired_periodic(const FlowBoundaryFace& minus_face, const FlowBoundaryFace& plus_face) {
-            return (minus_face.type == FlowBoundaryType::periodic) == (plus_face.type == FlowBoundaryType::periodic);
-        }
-
-        bool paired_periodic(const ScalarBoundaryFace& minus_face, const ScalarBoundaryFace& plus_face) {
-            return (minus_face.type == ScalarBoundaryType::periodic) == (plus_face.type == ScalarBoundaryType::periodic);
-        }
-
         void validate_config(const Config& config) {
             if (config.resolution[0] == 0 || config.resolution[1] == 0 || config.resolution[2] == 0) throw std::runtime_error("Keyframe smoke resolution must be positive");
             if (config.resolution[0] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || config.resolution[1] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || config.resolution[2] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke resolution exceeds CUDA solver int range");
             if (config.cell_size <= 0.0f) throw std::runtime_error("Keyframe smoke cell_size must be positive");
             if (config.pressure_iterations <= 0) throw std::runtime_error{"Keyframe smoke pressure_iterations must be positive"};
-            if (!paired_periodic(config.flow_boundary.x_minus, config.flow_boundary.x_plus) || !paired_periodic(config.flow_boundary.y_minus, config.flow_boundary.y_plus) || !paired_periodic(config.flow_boundary.z_minus, config.flow_boundary.z_plus)) throw std::runtime_error("Keyframe smoke flow periodic boundaries must be paired");
-            if (!paired_periodic(config.density_boundary.x_minus, config.density_boundary.x_plus) || !paired_periodic(config.density_boundary.y_minus, config.density_boundary.y_plus) || !paired_periodic(config.density_boundary.z_minus, config.density_boundary.z_plus)) throw std::runtime_error("Keyframe smoke density periodic boundaries must be paired");
-            if (!paired_periodic(config.temperature_boundary.x_minus, config.temperature_boundary.x_plus) || !paired_periodic(config.temperature_boundary.y_minus, config.temperature_boundary.y_plus) || !paired_periodic(config.temperature_boundary.z_minus, config.temperature_boundary.z_plus)) throw std::runtime_error("Keyframe smoke temperature periodic boundaries must be paired");
 
             const std::uint64_t cell_count = static_cast<std::uint64_t>(config.resolution[0]) * static_cast<std::uint64_t>(config.resolution[1]) * static_cast<std::uint64_t>(config.resolution[2]);
             if (cell_count == 0 || cell_count > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke cell count exceeds pressure solver int range");
@@ -94,9 +39,7 @@ namespace kfs::solver {
             host.buoyancy_density_factor     = config.buoyancy_density_factor;
             host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
             host.vorticity_confinement       = config.vorticity_confinement;
-            write_flow_boundary(config.flow_boundary, host.flow_boundary_types, host.flow_boundary_velocity);
-            write_scalar_boundary(config.density_boundary, host.density_boundary_types, host.density_boundary_values);
-            write_scalar_boundary(config.temperature_boundary, host.temperature_boundary_types, host.temperature_boundary_values);
+            host.boundary = boundary::pack(config.boundary);
             const auto cell_count = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
             host.density_source.resize(cell_count, 0.0f);
             host.temperature_source.resize(cell_count, 0.0f);
@@ -173,11 +116,9 @@ namespace kfs::solver {
             this->host   = {};
             this->device = {};
             initialize_host(this->host, config);
-            std::array<float, 6> flow_boundary_pressure{};
-            write_flow_boundary_pressure(config.flow_boundary, flow_boundary_pressure);
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
-            this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.flow_boundary_types.data(), this->host.flow_boundary_velocity.data(), flow_boundary_pressure.data());
+            this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
             this->set_plume_source(this->host.plume_source);
         } catch (...) {
             this->projection.reset();
@@ -249,13 +190,9 @@ namespace kfs::solver {
             if (request.iterations < 1) throw std::runtime_error{"Keyframe smoke step iterations must be positive"};
             auto& host   = this->host;
             auto& device = this->device;
-            const std::uint32_t* flow_types = host.flow_boundary_types.data();
-            const float* flow_velocity      = host.flow_boundary_velocity.data();
-            const std::array<bool, 3> periodic{
-                host.flow_boundary_types[0] == flow_boundary_periodic && host.flow_boundary_types[1] == flow_boundary_periodic,
-                host.flow_boundary_types[2] == flow_boundary_periodic && host.flow_boundary_types[3] == flow_boundary_periodic,
-                host.flow_boundary_types[4] == flow_boundary_periodic && host.flow_boundary_types[5] == flow_boundary_periodic,
-            };
+            const auto& flow_boundary = host.boundary.flow;
+            const std::uint32_t* flow_types = flow_boundary.types.data();
+            const float* flow_velocity      = flow_boundary.velocity.data();
             const auto step_start     = std::chrono::steady_clock::now();
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
@@ -268,21 +205,21 @@ namespace kfs::solver {
                     cuda::add_vorticity_confinement(host.stream, device.force.data[0], device.force.data[1], device.force.data[2], device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.occupancy, host.nx, host.ny, host.nz, host.cell_size, host.vorticity_confinement, flow_types);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
                         field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);
-                        cuda::enforce_staggered_boundary(host.stream, axis, device.velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
-                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.velocity.data[axis], host.nx, host.ny, host.nz);
+                        boundary::enforce_staggered_boundary(host.stream, axis, device.velocity, device.occupancy, device.solid_velocity, flow_boundary);
+                        if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.velocity);
                     }
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        (*this->advection)(device.temp_velocity, axis, device.velocity, device.velocity, device.occupancy, delta_seconds, flow_types, flow_velocity);
-                        cuda::enforce_staggered_boundary(host.stream, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
-                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
+                        (*this->advection)(device.temp_velocity, axis, device.velocity, device.velocity, device.occupancy, delta_seconds, flow_boundary);
+                        boundary::enforce_staggered_boundary(host.stream, axis, device.temp_velocity, device.occupancy, device.solid_velocity, flow_boundary);
+                        if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity);
                     }
                     (*this->projection)(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, delta_seconds);
                     field::add_scaled(host.stream, device.temperature_temp, device.temperature_data, device.temperature_source, delta_seconds);
-                    (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.temperature_boundary_types.data(), host.temperature_boundary_values.data(), flow_types, flow_velocity);
+                    (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
                     cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
                     field::add_scaled(host.stream, device.density_temp, device.density_data, device.density_source, delta_seconds);
-                    (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.density_boundary_types.data(), host.density_boundary_values.data(), flow_types, flow_velocity);
-                    cuda::boundary_fill_centered_scalar(host.stream, device.density_temp.data, device.density_data.data, device.occupancy, host.nx, host.ny, host.nz, host.density_boundary_types.data(), host.density_boundary_values.data());
+                    (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);
+                    boundary::boundary_fill_centered_scalar(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);
                     field::copy(host.stream, device.density_data, device.density_temp);
                     ++this->host.current_step;
                 }

@@ -1,0 +1,301 @@
+#include "keyframe.boundary.h"
+#include <cstdlib>
+#include <stdexcept>
+#include <string>
+
+namespace kfs::cuda::boundary {
+    unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
+        return static_cast<unsigned>((value + divisor - 1u) / divisor);
+    }
+
+    dim3 cell_block() {
+        return dim3{8u, 8u, 4u};
+    }
+
+    dim3 sync_velocity_block() {
+        return dim3{8u, 8u, 1u};
+    }
+
+    void require_resolution(const int nx, const int ny, const int nz) {
+        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
+    }
+
+    dim3 scalar_launch_grid(const int nx, const int ny, const int nz, const dim3& block) {
+        require_resolution(nx, ny, nz);
+        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
+    }
+
+    dim3 staggered_launch_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3& block) {
+        if (axis >= 3u) throw std::runtime_error{"Boundary staggered launch axis must be 0, 1, or 2"};
+        require_resolution(nx, ny, nz);
+        const auto nx64 = static_cast<std::uint64_t>(nx);
+        const auto ny64 = static_cast<std::uint64_t>(ny);
+        const auto nz64 = static_cast<std::uint64_t>(nz);
+        if (axis == 0u) return dim3{ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)};
+        if (axis == 1u) return dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)};
+        return dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z)};
+    }
+
+    dim3 sync_velocity_launch_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3& block) {
+        if (axis >= 3u) throw std::runtime_error{"Boundary sync launch axis must be 0, 1, or 2"};
+        require_resolution(nx, ny, nz);
+        if (axis == 0u) return dim3{ceil_div_u32(static_cast<std::uint64_t>(ny), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u};
+        if (axis == 1u) return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u};
+        return dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), 1u};
+    }
+
+    __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint8_t* occupancy, const float* solid_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+        const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
+        if (i > nx || j >= ny || k >= nz) return;
+
+        auto& face = velocity_x[index_velocity_x(i, j, k, nx, ny)];
+        if (i == 0) {
+            if (const auto domain_face = boundary.x_minus; domain_face.type != flow_boundary_periodic) {
+                if (domain_face.type == flow_boundary_outflow && nx > 0)
+                    face = velocity_x[index_velocity_x(1, j, k, nx, ny)];
+                else
+                    face = domain_face.velocity_x;
+                return;
+            }
+        }
+        if (i == nx) {
+            if (const auto domain_face = boundary.x_plus; domain_face.type != flow_boundary_periodic) {
+                if (domain_face.type == flow_boundary_outflow && nx > 0)
+                    face = velocity_x[index_velocity_x(nx - 1, j, k, nx, ny)];
+                else
+                    face = domain_face.velocity_x;
+                return;
+            }
+        }
+        if (occupancy == nullptr) return;
+
+        int left_x                = i - 1;
+        int left_y                = j;
+        int left_z                = k;
+        int right_x               = i;
+        int right_y               = j;
+        int right_z               = k;
+        const bool has_left       = resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary);
+        const bool has_right      = resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary);
+        const bool left_occupied  = has_left && occupancy[index_3d(left_x, left_y, left_z, nx, ny)] != 0;
+        const bool right_occupied = has_right && occupancy[index_3d(right_x, right_y, right_z, nx, ny)] != 0;
+        if (!left_occupied && !right_occupied) return;
+
+        float value  = 0.0f;
+        float weight = 0.0f;
+        if (left_occupied) {
+            value += solid_velocity_value(solid_velocity_x, occupancy, left_x, left_y, left_z, nx, ny, nz, boundary);
+            weight += 1.0f;
+        }
+        if (right_occupied) {
+            value += solid_velocity_value(solid_velocity_x, occupancy, right_x, right_y, right_z, nx, ny, nz, boundary);
+            weight += 1.0f;
+        }
+        face = weight > 0.0f ? value / weight : 0.0f;
+    }
+
+    __global__ void enforce_velocity_y_boundaries_kernel(float* velocity_y, const std::uint8_t* occupancy, const float* solid_velocity_y, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+        const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
+        if (i >= nx || j > ny || k >= nz) return;
+
+        auto& face = velocity_y[index_velocity_y(i, j, k, nx, ny)];
+        if (j == 0) {
+            if (const auto domain_face = boundary.y_minus; domain_face.type != flow_boundary_periodic) {
+                if (domain_face.type == flow_boundary_outflow && ny > 0)
+                    face = velocity_y[index_velocity_y(i, 1, k, nx, ny)];
+                else
+                    face = domain_face.velocity_y;
+                return;
+            }
+        }
+        if (j == ny) {
+            if (const auto domain_face = boundary.y_plus; domain_face.type != flow_boundary_periodic) {
+                if (domain_face.type == flow_boundary_outflow && ny > 0)
+                    face = velocity_y[index_velocity_y(i, ny - 1, k, nx, ny)];
+                else
+                    face = domain_face.velocity_y;
+                return;
+            }
+        }
+        if (occupancy == nullptr) return;
+
+        int down_x               = i;
+        int down_y               = j - 1;
+        int down_z               = k;
+        int up_x                 = i;
+        int up_y                 = j;
+        int up_z                 = k;
+        const bool has_down      = resolve_cell_coordinates(down_x, down_y, down_z, nx, ny, nz, boundary);
+        const bool has_up        = resolve_cell_coordinates(up_x, up_y, up_z, nx, ny, nz, boundary);
+        const bool down_occupied = has_down && occupancy[index_3d(down_x, down_y, down_z, nx, ny)] != 0;
+        const bool up_occupied   = has_up && occupancy[index_3d(up_x, up_y, up_z, nx, ny)] != 0;
+        if (!down_occupied && !up_occupied) return;
+
+        float value  = 0.0f;
+        float weight = 0.0f;
+        if (down_occupied) {
+            value += solid_velocity_value(solid_velocity_y, occupancy, down_x, down_y, down_z, nx, ny, nz, boundary);
+            weight += 1.0f;
+        }
+        if (up_occupied) {
+            value += solid_velocity_value(solid_velocity_y, occupancy, up_x, up_y, up_z, nx, ny, nz, boundary);
+            weight += 1.0f;
+        }
+        face = weight > 0.0f ? value / weight : 0.0f;
+    }
+
+    __global__ void enforce_velocity_z_boundaries_kernel(float* velocity_z, const std::uint8_t* occupancy, const float* solid_velocity_z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+        const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
+        if (i >= nx || j >= ny || k > nz) return;
+
+        auto& face = velocity_z[index_velocity_z(i, j, k, nx, ny)];
+        if (k == 0) {
+            if (const auto domain_face = boundary.z_minus; domain_face.type != flow_boundary_periodic) {
+                if (domain_face.type == flow_boundary_outflow && nz > 0)
+                    face = velocity_z[index_velocity_z(i, j, 1, nx, ny)];
+                else
+                    face = domain_face.velocity_z;
+                return;
+            }
+        }
+        if (k == nz) {
+            if (const auto domain_face = boundary.z_plus; domain_face.type != flow_boundary_periodic) {
+                if (domain_face.type == flow_boundary_outflow && nz > 0)
+                    face = velocity_z[index_velocity_z(i, j, nz - 1, nx, ny)];
+                else
+                    face = domain_face.velocity_z;
+                return;
+            }
+        }
+        if (occupancy == nullptr) return;
+
+        int back_x                = i;
+        int back_y                = j;
+        int back_z                = k - 1;
+        int front_x               = i;
+        int front_y               = j;
+        int front_z               = k;
+        const bool has_back       = resolve_cell_coordinates(back_x, back_y, back_z, nx, ny, nz, boundary);
+        const bool has_front      = resolve_cell_coordinates(front_x, front_y, front_z, nx, ny, nz, boundary);
+        const bool back_occupied  = has_back && occupancy[index_3d(back_x, back_y, back_z, nx, ny)] != 0;
+        const bool front_occupied = has_front && occupancy[index_3d(front_x, front_y, front_z, nx, ny)] != 0;
+        if (!back_occupied && !front_occupied) return;
+
+        float value  = 0.0f;
+        float weight = 0.0f;
+        if (back_occupied) {
+            value += solid_velocity_value(solid_velocity_z, occupancy, back_x, back_y, back_z, nx, ny, nz, boundary);
+            weight += 1.0f;
+        }
+        if (front_occupied) {
+            value += solid_velocity_value(solid_velocity_z, occupancy, front_x, front_y, front_z, nx, ny, nz, boundary);
+            weight += 1.0f;
+        }
+        face = weight > 0.0f ? value / weight : 0.0f;
+    }
+
+    __global__ void sync_periodic_velocity_x_kernel(float* velocity_x, const int nx, const int ny, const int nz) {
+        const int j = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int k = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        if (j >= ny || k >= nz) return;
+        velocity_x[index_velocity_x(nx, j, k, nx, ny)] = velocity_x[index_velocity_x(0, j, k, nx, ny)];
+    }
+
+    __global__ void sync_periodic_velocity_y_kernel(float* velocity_y, const int nx, const int ny, const int nz) {
+        const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int k = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        if (i >= nx || k >= nz) return;
+        velocity_y[index_velocity_y(i, ny, k, nx, ny)] = velocity_y[index_velocity_y(i, 0, k, nx, ny)];
+    }
+
+    __global__ void sync_periodic_velocity_z_kernel(float* velocity_z, const int nx, const int ny, const int nz) {
+        const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        if (i >= nx || j >= ny) return;
+        velocity_z[index_velocity_z(i, j, nz, nx, ny)] = velocity_z[index_velocity_z(i, j, 0, nx, ny)];
+    }
+
+    __global__ void boundary_fill_centered_scalar_kernel(float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const ScalarBoundary boundary) {
+        const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
+        if (x >= nx || y >= ny || z >= nz) return;
+
+        const auto index = index_3d(x, y, z, nx, ny);
+        if (occupancy == nullptr || occupancy[index] == 0) {
+            destination[index] = source[index];
+            return;
+        }
+
+        int max_radius = nx;
+        if (ny > max_radius) max_radius = ny;
+        if (nz > max_radius) max_radius = nz;
+        for (int radius = 1; radius <= max_radius; ++radius) {
+            bool found         = false;
+            float best_value   = 0.0f;
+            int best_distance2 = 0;
+            for (int dz = -radius; dz <= radius; ++dz) {
+                for (int dy = -radius; dy <= radius; ++dy) {
+                    for (int dx = -radius; dx <= radius; ++dx) {
+                        int shell_radius = abs(dx);
+                        if (abs(dy) > shell_radius) shell_radius = abs(dy);
+                        if (abs(dz) > shell_radius) shell_radius = abs(dz);
+                        if (shell_radius != radius) continue;
+                        int next_x = x + dx;
+                        int next_y = y + dy;
+                        int next_z = z + dz;
+                        if (!resolve_scalar_cell_coordinates(next_x, next_y, next_z, nx, ny, nz, boundary)) continue;
+                        const auto neighbor_index = index_3d(next_x, next_y, next_z, nx, ny);
+                        if (occupancy[neighbor_index] != 0) continue;
+                        const int distance2 = dx * dx + dy * dy + dz * dz;
+                        if (!found || distance2 < best_distance2) {
+                            found          = true;
+                            best_distance2 = distance2;
+                            best_value     = source[neighbor_index];
+                        }
+                    }
+                }
+            }
+            if (found) {
+                destination[index] = best_value;
+                return;
+            }
+        }
+        destination[index] = 0.0f;
+    }
+
+    void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint8_t* occupancy, const float* solid_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
+        if (axis >= 3u) throw std::runtime_error{"enforce_staggered_boundary: axis must be 0, 1, or 2"};
+        const dim3 block = cell_block();
+        const dim3 grid  = staggered_launch_grid(axis, nx, ny, nz, block);
+        const FlowBoundary boundary = make_flow_velocity_boundary(flow_types, flow_velocity);
+        if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
+        if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
+        if (axis == 2u) enforce_velocity_z_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"enforce_staggered_boundary_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void sync_periodic_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const int nx, const int ny, const int nz) {
+        if (axis >= 3u) throw std::runtime_error{"sync_periodic_staggered_component: axis must be 0, 1, or 2"};
+        const dim3 block = sync_velocity_block();
+        const dim3 grid  = sync_velocity_launch_grid(axis, nx, ny, nz, block);
+        if (axis == 0u) sync_periodic_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
+        if (axis == 1u) sync_periodic_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
+        if (axis == 2u) sync_periodic_velocity_z_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"sync_periodic_staggered_component_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
+        const dim3 block = cell_block();
+        const dim3 grid  = scalar_launch_grid(nx, ny, nz, block);
+        const ScalarBoundary boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
+        boundary_fill_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, occupancy, nx, ny, nz, boundary);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary_fill_centered_scalar_kernel: "} + cudaGetErrorString(status)};
+    }
+} // namespace kfs::cuda::boundary
