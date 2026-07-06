@@ -1,6 +1,4 @@
 module;
-#include "keyframe.solver.h"
-
 #include "keyframe.field.h"
 #include <cuda_runtime.h>
 
@@ -9,7 +7,9 @@ import std;
 import keyframe.field;
 import keyframe.boundary;
 import keyframe.operators.advection;
+import keyframe.operators.buoyancy;
 import keyframe.operators.projection;
+import keyframe.operators.solid;
 import keyframe.operators.vorticity;
 
 namespace kfs::solver {
@@ -19,6 +19,9 @@ namespace kfs::solver {
             if (config.resolution[0] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || config.resolution[1] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || config.resolution[2] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke resolution exceeds CUDA solver int range");
             if (config.cell_size <= 0.0f) throw std::runtime_error("Keyframe smoke cell_size must be positive");
             if (config.pressure_iterations <= 0) throw std::runtime_error{"Keyframe smoke pressure_iterations must be positive"};
+            if (!std::isfinite(config.ambient_temperature)) throw std::runtime_error{"Keyframe smoke ambient_temperature must be finite"};
+            if (!std::isfinite(config.buoyancy_density_factor)) throw std::runtime_error{"Keyframe smoke buoyancy_density_factor must be finite"};
+            if (!std::isfinite(config.buoyancy_temperature_factor)) throw std::runtime_error{"Keyframe smoke buoyancy_temperature_factor must be finite"};
 
             const std::uint64_t cell_count = static_cast<std::uint64_t>(config.resolution[0]) * static_cast<std::uint64_t>(config.resolution[1]) * static_cast<std::uint64_t>(config.resolution[2]);
             if (cell_count == 0 || cell_count > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke cell count exceeds pressure solver int range");
@@ -37,8 +40,6 @@ namespace kfs::solver {
             host.nz                          = static_cast<std::int32_t>(config.resolution[2]);
             host.cell_size                   = config.cell_size;
             host.ambient_temperature         = config.ambient_temperature;
-            host.buoyancy_density_factor     = config.buoyancy_density_factor;
-            host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
             host.boundary = boundary::pack(config.boundary);
             const auto cell_count = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
             host.density_source.resize(cell_count, 0.0f);
@@ -114,12 +115,16 @@ namespace kfs::solver {
             initialize_host(this->host, config);
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
+            this->buoyancy.emplace(this->host.stream, this->host.ambient_temperature, config.buoyancy_density_factor, config.buoyancy_temperature_factor, this->host.boundary.flow);
             this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
+            this->solid.emplace(this->host.stream);
             this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.flow);
             this->set_plume_source(this->host.plume_source);
         } catch (...) {
             this->vorticity.reset();
+            this->solid.reset();
             this->projection.reset();
+            this->buoyancy.reset();
             this->advection.reset();
             destroy_device(*this);
             throw;
@@ -128,7 +133,9 @@ namespace kfs::solver {
 
     Solver::~Solver() noexcept {
         this->vorticity.reset();
+        this->solid.reset();
         this->projection.reset();
+        this->buoyancy.reset();
         this->advection.reset();
         destroy_device(*this);
     }
@@ -189,15 +196,14 @@ namespace kfs::solver {
             auto& host   = this->host;
             auto& device = this->device;
             const auto& flow_boundary = host.boundary.flow;
-            const std::uint32_t* flow_types = flow_boundary.types.data();
             const auto step_start     = std::chrono::steady_clock::now();
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
-                    cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
+                    this->solid->apply_scalar(device.temperature_data, device.solid_temperature, device.occupancy);
                     field::center_staggered(host.stream, device.centered_velocity, device.velocity);
                     field::fill(host.stream, device.force, 0.0f);
-                    cuda::add_buoyancy(host.stream, device.force.data[1], device.density_data.data, device.temperature_data.data, device.occupancy, host.nx, host.ny, host.nz, host.ambient_temperature, host.buoyancy_density_factor, host.buoyancy_temperature_factor, flow_types);
+                    (*this->buoyancy)(device.force, device.density_data, device.temperature_data, device.occupancy);
                     (*this->vorticity)(device.force, device.centered_velocity, device.occupancy);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
                         field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);
@@ -212,7 +218,7 @@ namespace kfs::solver {
                     (*this->projection)(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, delta_seconds);
                     field::add_scaled(host.stream, device.temperature_temp, device.temperature_data, device.temperature_source, delta_seconds);
                     (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
-                    cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
+                    this->solid->apply_scalar(device.temperature_data, device.solid_temperature, device.occupancy);
                     field::add_scaled(host.stream, device.density_temp, device.density_data, device.density_source, delta_seconds);
                     (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);
                     boundary::boundary_fill_centered_scalar(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 project(keyframe-control-of-smoke-simulation VERSION 1.0.0 LANGUAGES CXX CUDA)
 
-option(KEYFRAME_BUILD_APP "Build the optional Keyframe executable" ON)
+option(KEYFRAME_BUILD_APP "Build the optional Keyframe executable" OFF)
 option(KEYFRAME_BUILD_PROJECT_PLUGIN "Build the optional Spectra project plugin" OFF)
 
 # ============================================================================
@@ -80,15 +80,19 @@ target_sources(
         operators/keyframe.operators.advection.cpp
         operators/keyframe.operators.advection.cu
         operators/keyframe.operators.advection.h
+        operators/keyframe.operators.buoyancy.cpp
+        operators/keyframe.operators.buoyancy.cu
+        operators/keyframe.operators.buoyancy.h
         operators/keyframe.operators.projection.cpp
         operators/keyframe.operators.projection.cu
         operators/keyframe.operators.projection.h
+        operators/keyframe.operators.solid.cpp
+        operators/keyframe.operators.solid.cu
+        operators/keyframe.operators.solid.h
         operators/keyframe.operators.vorticity.cpp
         operators/keyframe.operators.vorticity.cu
         operators/keyframe.operators.vorticity.h
-        keyframe.solver.cu
         keyframe.solver.cpp
-        keyframe.solver.h
         keyframe.inspector.cu
         keyframe.inspector.cpp
         keyframe.inspector.h
@@ -97,7 +101,9 @@ target_sources(
         keyframe.field.ixx
         keyframe.boundary.ixx
         operators/keyframe.operators.advection.ixx
+        operators/keyframe.operators.buoyancy.ixx
         operators/keyframe.operators.projection.ixx
+        operators/keyframe.operators.solid.ixx
         operators/keyframe.operators.vorticity.ixx
         keyframe.solver.ixx
         keyframe.inspector.ixx
