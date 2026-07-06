@@ -10,6 +10,7 @@ import keyframe.field;
 import keyframe.boundary;
 import keyframe.operators.advection;
 import keyframe.operators.projection;
+import keyframe.operators.vorticity;
 
 namespace kfs::solver {
     namespace {
@@ -38,7 +39,6 @@ namespace kfs::solver {
             host.ambient_temperature         = config.ambient_temperature;
             host.buoyancy_density_factor     = config.buoyancy_density_factor;
             host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
-            host.vorticity_confinement       = config.vorticity_confinement;
             host.boundary = boundary::pack(config.boundary);
             const auto cell_count = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
             host.density_source.resize(cell_count, 0.0f);
@@ -57,8 +57,6 @@ namespace kfs::solver {
             field::fill(host.stream, device.velocity, 0.0f);
             field::fill(host.stream, device.temp_velocity, 0.0f);
             field::fill(host.stream, device.centered_velocity, 0.0f);
-            field::fill(host.stream, device.vorticity, 0.0f);
-            field::fill(host.stream, device.vorticity_magnitude, 0.0f);
             field::fill(host.stream, device.solid_temperature, host.ambient_temperature);
             if (const cudaError_t status = cudaMemsetAsync(device.occupancy, 0, device.density_data.count() * sizeof(std::uint8_t), host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync occupancy: "} + cudaGetErrorString(status)};
         }
@@ -95,8 +93,6 @@ namespace kfs::solver {
                 device.velocity.resize(resolution);
                 device.temp_velocity.resize(resolution);
                 device.centered_velocity.resize(resolution);
-                device.vorticity.resize(resolution);
-                device.vorticity_magnitude.resize(resolution);
                 device.solid_temperature.resize(resolution);
                 const auto cell_count = device.density_data.count();
                 if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&device.occupancy), static_cast<std::size_t>(cell_count) * sizeof(std::uint8_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy: "} + cudaGetErrorString(status)};
@@ -119,8 +115,10 @@ namespace kfs::solver {
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
             this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
+            this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.flow);
             this->set_plume_source(this->host.plume_source);
         } catch (...) {
+            this->vorticity.reset();
             this->projection.reset();
             this->advection.reset();
             destroy_device(*this);
@@ -129,6 +127,7 @@ namespace kfs::solver {
     }
 
     Solver::~Solver() noexcept {
+        this->vorticity.reset();
         this->projection.reset();
         this->advection.reset();
         destroy_device(*this);
@@ -191,17 +190,15 @@ namespace kfs::solver {
             auto& device = this->device;
             const auto& flow_boundary = host.boundary.flow;
             const std::uint32_t* flow_types = flow_boundary.types.data();
-            const float* flow_velocity      = flow_boundary.velocity.data();
             const auto step_start     = std::chrono::steady_clock::now();
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
                     cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
                     field::center_staggered(host.stream, device.centered_velocity, device.velocity);
-                    cuda::compute_vorticity(host.stream, device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.centered_velocity.data[0], device.centered_velocity.data[1], device.centered_velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, flow_types, flow_velocity);
                     field::fill(host.stream, device.force, 0.0f);
                     cuda::add_buoyancy(host.stream, device.force.data[1], device.density_data.data, device.temperature_data.data, device.occupancy, host.nx, host.ny, host.nz, host.ambient_temperature, host.buoyancy_density_factor, host.buoyancy_temperature_factor, flow_types);
-                    cuda::add_vorticity_confinement(host.stream, device.force.data[0], device.force.data[1], device.force.data[2], device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.occupancy, host.nx, host.ny, host.nz, host.cell_size, host.vorticity_confinement, flow_types);
+                    (*this->vorticity)(device.force, device.centered_velocity, device.occupancy);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
                         field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);
                         boundary::enforce_staggered_boundary(host.stream, axis, device.velocity, device.occupancy, device.solid_velocity, flow_boundary);

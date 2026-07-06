@@ -586,7 +586,7 @@ namespace kfs::project {
         controls.metric("cell_size", "Cell Size", std::format("{:.6f}", this->state->smoke->host.cell_size)).section(section_simulation_id);
         controls.metric("dt", "Delta Seconds", std::format("{:.6f}", this->state->open.delta_seconds)).section(section_simulation_id);
         controls.metric("steps_per_update", "Steps Per Update", this->state->open.steps_per_update).section(section_simulation_id);
-        controls.metric("vorticity_confinement", "Vorticity", std::format("{:.6f}", this->state->smoke->host.vorticity_confinement)).section(section_simulation_id);
+        controls.metric("vorticity_confinement", "Vorticity", std::format("{:.6f}", this->state->open.config.vorticity_confinement)).section(section_simulation_id);
         controls.metric("volume", "Volume", this->state->debug.show_volume && this->state->density_volume.has_value() ? "visible" : this->state->debug.show_volume ? "pending" : "hidden").section(section_view_id);
         controls.metric("density_scale", "Density Scale", std::format("{:.3f}x", this->state->debug.density_scale)).section(section_view_id);
         controls.metric("domain", "Domain", this->state->domain_segments.has_value() ? "visible" : "hidden").section(section_view_id);

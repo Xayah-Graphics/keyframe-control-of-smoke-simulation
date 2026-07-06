@@ -83,6 +83,9 @@ target_sources(
         operators/keyframe.operators.projection.cpp
         operators/keyframe.operators.projection.cu
         operators/keyframe.operators.projection.h
+        operators/keyframe.operators.vorticity.cpp
+        operators/keyframe.operators.vorticity.cu
+        operators/keyframe.operators.vorticity.h
         keyframe.solver.cu
         keyframe.solver.cpp
         keyframe.solver.h
@@ -95,6 +98,7 @@ target_sources(
         keyframe.boundary.ixx
         operators/keyframe.operators.advection.ixx
         operators/keyframe.operators.projection.ixx
+        operators/keyframe.operators.vorticity.ixx
         keyframe.solver.ixx
         keyframe.inspector.ixx
 )

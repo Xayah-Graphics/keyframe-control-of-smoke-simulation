@@ -7,6 +7,7 @@ export import keyframe.field;
 export import keyframe.boundary;
 export import keyframe.operators.advection;
 import keyframe.operators.projection;
+import keyframe.operators.vorticity;
 
 namespace kfs::solver {
     export struct Config final {
@@ -58,7 +59,6 @@ namespace kfs::solver {
             float ambient_temperature{0.0f};
             float buoyancy_density_factor{0.0f};
             float buoyancy_temperature_factor{0.0f};
-            float vorticity_confinement{0.0f};
             boundary::PackedDomainBoundary boundary{};
             cudaStream_t stream{nullptr};
             PlumeSource plume_source{};
@@ -79,8 +79,6 @@ namespace kfs::solver {
             field::StaggeredVectorField3D velocity{{0, 0, 0}};
             field::StaggeredVectorField3D temp_velocity{{0, 0, 0}};
             field::CenteredVectorField3D centered_velocity{{0, 0, 0}};
-            field::CenteredVectorField3D vorticity{{0, 0, 0}};
-            field::ScalarField3D vorticity_magnitude{{0, 0, 0}};
             field::ScalarField3D solid_temperature{{0, 0, 0}};
             std::uint8_t* occupancy{nullptr};
         } device;
@@ -88,5 +86,6 @@ namespace kfs::solver {
     private:
         std::optional<operators::Advection> advection{};
         std::optional<operators::Projection> projection{};
+        std::optional<operators::Vorticity> vorticity{};
     };
 } // namespace kfs::solver
