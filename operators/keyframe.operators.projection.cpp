@@ -246,7 +246,7 @@ namespace kfs::operators {
             cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, occupancy, solid_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_velocity);
             boundary::enforce_staggered_boundary(this->stream, axis, working, occupancy, solid_velocity, this->flow_boundary);
             if (this->flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(this->stream, axis, working);
-            field::copy_staggered_component(this->stream, destination, axis, working);
+            field::copy_component(this->stream, destination, axis, working);
         }
     }
 } // namespace kfs::operators

@@ -39,6 +39,49 @@ namespace kfs::field {
             if (count > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error{"field element count exceeds int range"};
             return count;
         }
+
+        void require_stream(const cudaStream_t stream) {
+            if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
+        }
+
+        void require_axis(const std::uint32_t axis) {
+            if (axis >= 3u) throw std::runtime_error{"invalid axis"};
+        }
+
+        void require_scalar_field(const ScalarField3D& values, const char* name) {
+            if (values.resolution == empty_resolution || values.count() == 0u || values.data == nullptr) throw std::runtime_error{std::string{name} + " field is empty"};
+        }
+
+        void require_centered_component(const CenteredVectorField3D& values, const std::uint32_t axis, const char* name) {
+            require_axis(axis);
+            if (values.resolution == empty_resolution || values.count() == 0u || values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
+        }
+
+        void require_centered_field(const CenteredVectorField3D& values, const char* name) {
+            for (std::uint32_t axis = 0u; axis < 3u; ++axis) require_centered_component(values, axis, name);
+        }
+
+        void require_staggered_component(const StaggeredVectorField3D& values, const std::uint32_t axis, const char* name) {
+            require_axis(axis);
+            if (values.resolution == empty_resolution || values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{std::string{name} + " field component is empty"};
+        }
+
+        void require_staggered_field(const StaggeredVectorField3D& values, const char* name) {
+            for (std::uint32_t axis = 0u; axis < 3u; ++axis) require_staggered_component(values, axis, name);
+        }
+
+        void require_span_size(const std::span<const float> source, const std::uint64_t expected, const char* name) {
+            if (static_cast<std::uint64_t>(source.size()) != expected) throw std::runtime_error{std::string{name} + " span size mismatch"};
+            if (expected > 0u && source.data() == nullptr) throw std::runtime_error{std::string{name} + " span data is null"};
+        }
+
+        void copy_device_buffer(const cudaStream_t stream, float* const destination, const float* const source, const std::size_t bytes, const char* name) {
+            if (const cudaError_t status = cudaMemcpyAsync(destination, source, bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync "} + name + ": " + cudaGetErrorString(status)};
+        }
+
+        void upload_device_buffer(const cudaStream_t stream, float* const destination, const std::span<const float> source, const std::size_t bytes, const char* name) {
+            if (const cudaError_t status = cudaMemcpyAsync(destination, source.data(), bytes, cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync "} + name + ": " + cudaGetErrorString(status)};
+        }
     } // namespace
 
     ScalarField3D::ScalarField3D(const std::array<std::int32_t, 3> resolution) : resolution{empty_resolution} {
@@ -99,24 +142,34 @@ namespace kfs::field {
         this->storage_kind = ScalarFieldStorageKind::external;
     }
 
-    void ScalarField3D::fill(cudaStream_t stream, const float value) {
-        if (this->resolution == empty_resolution || this->data == nullptr) throw std::runtime_error{"field is empty"};
-        cuda::field::fill(stream, this->data, this->count(), value);
-    }
-
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source) {
+        require_stream(stream);
         if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
-        if (destination.resolution == empty_resolution || destination.data == nullptr) throw std::runtime_error{"field is empty"};
-        if (source.resolution == empty_resolution || source.data == nullptr) throw std::runtime_error{"field is empty"};
-        if (const cudaError_t status = cudaMemcpyAsync(destination.data, source.data, destination.bytes(), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync scalar copy: "} + cudaGetErrorString(status)};
+        require_scalar_field(destination, "destination");
+        require_scalar_field(source, "source");
+        copy_device_buffer(stream, destination.data, source.data, destination.bytes(), "scalar copy");
     }
 
     void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, const float scale) {
+        require_stream(stream);
         if (destination.resolution != current.resolution || destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
-        if (destination.resolution == empty_resolution || destination.data == nullptr) throw std::runtime_error{"field is empty"};
-        if (current.resolution == empty_resolution || current.data == nullptr) throw std::runtime_error{"field is empty"};
-        if (source.resolution == empty_resolution || source.data == nullptr) throw std::runtime_error{"field is empty"};
+        require_scalar_field(destination, "destination");
+        require_scalar_field(current, "current");
+        require_scalar_field(source, "source");
         cuda::field::add_scaled(stream, destination.data, current.data, source.data, destination.count(), scale);
+    }
+
+    void fill(cudaStream_t stream, ScalarField3D& values, const float value) {
+        require_stream(stream);
+        require_scalar_field(values, "values");
+        cuda::field::fill(stream, values.data, values.count(), value);
+    }
+
+    void upload(cudaStream_t stream, ScalarField3D& destination, const std::span<const float> source) {
+        require_stream(stream);
+        require_scalar_field(destination, "destination");
+        require_span_size(source, destination.count(), "source");
+        upload_device_buffer(stream, destination.data, source, destination.bytes(), "scalar upload");
     }
 
     CenteredVectorField3D::CenteredVectorField3D(const std::array<std::int32_t, 3> resolution) : resolution{empty_resolution} {
@@ -169,20 +222,58 @@ namespace kfs::field {
         this->resolution = resolution;
     }
 
-    void CenteredVectorField3D::fill(cudaStream_t stream, const float value) {
-        const std::uint64_t count = this->count();
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-            if (this->resolution == empty_resolution || this->data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-            cuda::field::fill(stream, this->data[axis], count, value);
-        }
+    void fill(cudaStream_t stream, CenteredVectorField3D& values, const float value) {
+        require_stream(stream);
+        require_centered_field(values, "values");
+        const std::uint64_t count = values.count();
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::fill(stream, values.data[axis], count, value);
+    }
+
+    void copy(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source) {
+        require_stream(stream);
+        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        require_centered_field(destination, "destination");
+        require_centered_field(source, "source");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) copy_device_buffer(stream, destination.data[axis], source.data[axis], destination.bytes(), "centered vector copy");
+    }
+
+    void copy_component(cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const CenteredVectorField3D& source) {
+        require_stream(stream);
+        require_axis(axis);
+        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        require_centered_component(destination, axis, "destination");
+        require_centered_component(source, axis, "source");
+        copy_device_buffer(stream, destination.data[axis], source.data[axis], destination.bytes(), "centered vector component copy");
+    }
+
+    void add_scaled(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, const float scale) {
+        require_stream(stream);
+        if (destination.resolution != current.resolution || destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        require_centered_field(destination, "destination");
+        require_centered_field(current, "current");
+        require_centered_field(source, "source");
+        const std::uint64_t count = destination.count();
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::add_scaled(stream, destination.data[axis], current.data[axis], source.data[axis], count, scale);
+    }
+
+    void upload(cudaStream_t stream, CenteredVectorField3D& destination, const std::array<std::span<const float>, 3> source) {
+        require_stream(stream);
+        require_centered_field(destination, "destination");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) upload_component(stream, destination, axis, source[axis]);
+    }
+
+    void upload_component(cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const std::span<const float> source) {
+        require_stream(stream);
+        require_centered_component(destination, axis, "destination");
+        require_span_size(source, destination.count(), "source");
+        upload_device_buffer(stream, destination.data[axis], source, destination.bytes(), "centered vector component upload");
     }
 
     void center_staggered(cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source) {
+        require_stream(stream);
         if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-            if (destination.resolution == empty_resolution || destination.data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-            if (source.resolution == empty_resolution || source.data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-        }
+        require_centered_field(destination, "destination");
+        require_staggered_field(source, "source");
         cuda::field::center_staggered(stream, destination.data[0], destination.data[1], destination.data[2], source.data[0], source.data[1], source.data[2], destination.resolution);
     }
 
@@ -235,26 +326,57 @@ namespace kfs::field {
         this->resolution = resolution;
     }
 
-    void StaggeredVectorField3D::fill(cudaStream_t stream, const float value) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-            if (this->resolution == empty_resolution || this->data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-            cuda::field::fill(stream, this->data[axis], this->count(axis), value);
-        }
+    void fill(cudaStream_t stream, StaggeredVectorField3D& values, const float value) {
+        require_stream(stream);
+        require_staggered_field(values, "values");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::fill(stream, values.data[axis], values.count(axis), value);
+    }
+
+    void copy(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source) {
+        require_stream(stream);
+        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        require_staggered_field(destination, "destination");
+        require_staggered_field(source, "source");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) copy_device_buffer(stream, destination.data[axis], source.data[axis], destination.bytes(axis), "staggered vector copy");
+    }
+
+    void copy_component(cudaStream_t stream, StaggeredVectorField3D& destination, const std::uint32_t axis, const StaggeredVectorField3D& source) {
+        require_stream(stream);
+        require_axis(axis);
+        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        require_staggered_component(destination, axis, "destination");
+        require_staggered_component(source, axis, "source");
+        copy_device_buffer(stream, destination.data[axis], source.data[axis], destination.bytes(axis), "staggered vector component copy");
+    }
+
+    void add_scaled(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, const float scale) {
+        require_stream(stream);
+        if (destination.resolution != current.resolution || destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        require_staggered_field(destination, "destination");
+        require_staggered_field(current, "current");
+        require_staggered_field(source, "source");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::add_scaled(stream, destination.data[axis], current.data[axis], source.data[axis], destination.count(axis), scale);
+    }
+
+    void upload(cudaStream_t stream, StaggeredVectorField3D& destination, const std::array<std::span<const float>, 3> source) {
+        require_stream(stream);
+        require_staggered_field(destination, "destination");
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) upload_component(stream, destination, axis, source[axis]);
+    }
+
+    void upload_component(cudaStream_t stream, StaggeredVectorField3D& destination, const std::uint32_t axis, const std::span<const float> source) {
+        require_stream(stream);
+        require_staggered_component(destination, axis, "destination");
+        require_span_size(source, destination.count(axis), "source");
+        upload_device_buffer(stream, destination.data[axis], source, destination.bytes(axis), "staggered vector component upload");
     }
 
     void add_centered_to_staggered(cudaStream_t stream, StaggeredVectorField3D& destination, const std::uint32_t axis, const CenteredVectorField3D& source, const float scale) {
-        if (axis >= 3u) throw std::runtime_error{"invalid axis"};
+        require_stream(stream);
+        require_axis(axis);
         if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
-        if (destination.resolution == empty_resolution || destination.data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-        if (source.resolution == empty_resolution || source.data[axis] == nullptr) throw std::runtime_error{"field is empty"};
+        require_staggered_component(destination, axis, "destination");
+        require_centered_component(source, axis, "source");
         cuda::field::add_centered_to_staggered(stream, destination.data[axis], source.data[axis], axis, destination.resolution, scale);
-    }
-
-    void copy_staggered_component(cudaStream_t stream, StaggeredVectorField3D& destination, const std::uint32_t axis, const StaggeredVectorField3D& source) {
-        if (axis >= 3u) throw std::runtime_error{"invalid axis"};
-        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
-        if (destination.resolution == empty_resolution || destination.data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-        if (source.resolution == empty_resolution || source.data[axis] == nullptr) throw std::runtime_error{"field is empty"};
-        if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source.data[axis], destination.bytes(axis), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered component copy: "} + cudaGetErrorString(status)};
     }
 } // namespace kfs::field

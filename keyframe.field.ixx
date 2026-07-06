@@ -23,7 +23,6 @@ export namespace kfs::field {
 
         void resize(std::array<std::int32_t, 3> resolution);
         void bind_external(std::array<std::int32_t, 3> resolution, float* data);
-        void fill(cudaStream_t stream, float value);
 
         std::array<std::int32_t, 3> resolution;
         float* data{nullptr};
@@ -42,7 +41,6 @@ export namespace kfs::field {
         [[nodiscard]] std::size_t bytes() const;
 
         void resize(std::array<std::int32_t, 3> resolution);
-        void fill(cudaStream_t stream, float value);
 
         std::array<std::int32_t, 3> resolution;
         std::array<float*, 3> data{};
@@ -60,15 +58,27 @@ export namespace kfs::field {
         [[nodiscard]] std::size_t bytes(std::uint32_t axis) const;
 
         void resize(std::array<std::int32_t, 3> resolution);
-        void fill(cudaStream_t stream, float value);
 
         std::array<std::int32_t, 3> resolution;
         std::array<float*, 3> data{};
     };
 
+    void fill(cudaStream_t stream, ScalarField3D& values, float value);
+    void fill(cudaStream_t stream, CenteredVectorField3D& values, float value);
+    void fill(cudaStream_t stream, StaggeredVectorField3D& values, float value);
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source);
+    void copy(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source);
+    void copy(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source);
+    void copy_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source);
+    void copy_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const StaggeredVectorField3D& source);
     void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, float scale);
+    void add_scaled(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, float scale);
+    void add_scaled(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, float scale);
+    void upload(cudaStream_t stream, ScalarField3D& destination, std::span<const float> source);
+    void upload(cudaStream_t stream, CenteredVectorField3D& destination, std::array<std::span<const float>, 3> source);
+    void upload(cudaStream_t stream, StaggeredVectorField3D& destination, std::array<std::span<const float>, 3> source);
+    void upload_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, std::span<const float> source);
+    void upload_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, std::span<const float> source);
     void center_staggered(cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source);
     void add_centered_to_staggered(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source, float scale);
-    void copy_staggered_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const StaggeredVectorField3D& source);
 } // namespace kfs::field

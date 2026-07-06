@@ -388,7 +388,7 @@ namespace kfs::project {
             if (state.density_external_bound && view.density == density_values) return;
             if (state.density_external_bound && view.density != density_values) throw std::runtime_error{"Keyframe smoke density external buffer changed after binding."};
             state.smoke->device.density_data.bind_external({state.smoke->host.nx, state.smoke->host.ny, state.smoke->host.nz}, density_values);
-            state.smoke->device.density_data.fill(state.smoke->host.stream, 0.0f);
+            field::fill(state.smoke->host.stream, state.smoke->device.density_data, 0.0f);
             if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density external bind failed: "} + cudaGetErrorString(status)};
             state.density_external_bound    = true;
             state.exported_density_revision = 0u;

@@ -46,20 +46,20 @@ namespace kfs::solver {
         }
 
         void initialize_field_buffers(const Solver::HostData& host, Solver::DeviceData& device) {
-            device.density_data.fill(host.stream, 0.0f);
-            device.density_temp.fill(host.stream, 0.0f);
-            device.density_source.fill(host.stream, 0.0f);
-            device.temperature_data.fill(host.stream, host.ambient_temperature);
-            device.temperature_temp.fill(host.stream, host.ambient_temperature);
-            device.temperature_source.fill(host.stream, 0.0f);
-            device.force.fill(host.stream, 0.0f);
-            device.solid_velocity.fill(host.stream, 0.0f);
-            device.velocity.fill(host.stream, 0.0f);
-            device.temp_velocity.fill(host.stream, 0.0f);
-            device.centered_velocity.fill(host.stream, 0.0f);
-            device.vorticity.fill(host.stream, 0.0f);
-            device.vorticity_magnitude.fill(host.stream, 0.0f);
-            device.solid_temperature.fill(host.stream, host.ambient_temperature);
+            field::fill(host.stream, device.density_data, 0.0f);
+            field::fill(host.stream, device.density_temp, 0.0f);
+            field::fill(host.stream, device.density_source, 0.0f);
+            field::fill(host.stream, device.temperature_data, host.ambient_temperature);
+            field::fill(host.stream, device.temperature_temp, host.ambient_temperature);
+            field::fill(host.stream, device.temperature_source, 0.0f);
+            field::fill(host.stream, device.force, 0.0f);
+            field::fill(host.stream, device.solid_velocity, 0.0f);
+            field::fill(host.stream, device.velocity, 0.0f);
+            field::fill(host.stream, device.temp_velocity, 0.0f);
+            field::fill(host.stream, device.centered_velocity, 0.0f);
+            field::fill(host.stream, device.vorticity, 0.0f);
+            field::fill(host.stream, device.vorticity_magnitude, 0.0f);
+            field::fill(host.stream, device.solid_temperature, host.ambient_temperature);
             if (const cudaError_t status = cudaMemsetAsync(device.occupancy, 0, device.density_data.count() * sizeof(std::uint8_t), host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync occupancy: "} + cudaGetErrorString(status)};
         }
 
@@ -178,9 +178,8 @@ namespace kfs::solver {
             }
         }
 
-        const auto source_bytes = this->device.density_source.bytes();
-        if (const cudaError_t status = cudaMemcpyAsync(this->device.density_source.data, this->host.density_source.data(), source_bytes, cudaMemcpyHostToDevice, this->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync density_source: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMemcpyAsync(this->device.temperature_source.data, this->host.temperature_source.data(), source_bytes, cudaMemcpyHostToDevice, this->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync temperature_source: "} + cudaGetErrorString(status)};
+        field::upload(this->host.stream, this->device.density_source, std::span<const float>{this->host.density_source.data(), this->host.density_source.size()});
+        field::upload(this->host.stream, this->device.temperature_source, std::span<const float>{this->host.temperature_source.data(), this->host.temperature_source.size()});
         if (const cudaError_t status = cudaStreamSynchronize(this->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize plume source: "} + cudaGetErrorString(status)};
     }
 
@@ -200,7 +199,7 @@ namespace kfs::solver {
                     cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
                     field::center_staggered(host.stream, device.centered_velocity, device.velocity);
                     cuda::compute_vorticity(host.stream, device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.centered_velocity.data[0], device.centered_velocity.data[1], device.centered_velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, flow_types, flow_velocity);
-                    device.force.fill(host.stream, 0.0f);
+                    field::fill(host.stream, device.force, 0.0f);
                     cuda::add_buoyancy(host.stream, device.force.data[1], device.density_data.data, device.temperature_data.data, device.occupancy, host.nx, host.ny, host.nz, host.ambient_temperature, host.buoyancy_density_factor, host.buoyancy_temperature_factor, flow_types);
                     cuda::add_vorticity_confinement(host.stream, device.force.data[0], device.force.data[1], device.force.data[2], device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.occupancy, host.nx, host.ny, host.nz, host.cell_size, host.vorticity_confinement, flow_types);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
