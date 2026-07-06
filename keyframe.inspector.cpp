@@ -8,7 +8,7 @@ import keyframe.solver;
 
 namespace kfs::inspector {
 namespace {
-    void require_initialized(const solver::KeyframeSmoke& smoke) {
+    void require_initialized(const solver::Solver& smoke) {
         if (smoke.host.stream == nullptr) throw std::runtime_error{"keyframe solver is not initialized."};
         if (smoke.device.density_data.data == nullptr || smoke.device.temperature_data.data == nullptr) throw std::runtime_error{"keyframe scalar fields are not initialized."};
         for (std::uint32_t axis = 0u; axis < 3u; ++axis)
@@ -16,7 +16,7 @@ namespace {
     }
 } // namespace
 
-    Inspector::Inspector(const solver::KeyframeSmoke& smoke) : smoke{std::addressof(smoke)} {}
+    Inspector::Inspector(const solver::Solver& smoke) : smoke{std::addressof(smoke)} {}
 
     SolverDeviceView Inspector::device_view() const {
         if (this->smoke == nullptr) throw std::runtime_error{"keyframe inspector solver is null."};

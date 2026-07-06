@@ -90,13 +90,13 @@ namespace kfs::solver {
         float elapsed_ms{0.0f};
     };
 
-    export struct KeyframeSmoke final {
-        explicit KeyframeSmoke(const Config& config = {});
-        ~KeyframeSmoke() noexcept;
-        KeyframeSmoke(const KeyframeSmoke& other)                = delete;
-        KeyframeSmoke& operator=(const KeyframeSmoke& other)     = delete;
-        KeyframeSmoke(KeyframeSmoke&& other) noexcept            = delete;
-        KeyframeSmoke& operator=(KeyframeSmoke&& other) noexcept = delete;
+    export struct Solver final {
+        explicit Solver(const Config& config = {});
+        ~Solver() noexcept;
+        Solver(const Solver& other)                = delete;
+        Solver& operator=(const Solver& other)     = delete;
+        Solver(Solver&& other) noexcept            = delete;
+        Solver& operator=(Solver&& other) noexcept = delete;
 
         void set_plume_source(const PlumeSource& source);
         [[nodiscard]] std::expected<StepStats, std::string> step(const StepRequest& request);
@@ -130,7 +130,7 @@ namespace kfs::solver {
             std::vector<float> density_source{};
             std::vector<float> temperature_source{};
             std::uint32_t current_step{0u};
-        };
+        } host;
 
         struct DeviceData final {
             cuda::field::ScalarField3D density_data{{0, 0, 0}};
@@ -165,12 +165,6 @@ namespace kfs::solver {
             float* pressure_beta{nullptr};
             float* pressure_one{nullptr};
             void* spmv_buffer{nullptr};
-        };
-
-        HostData host{};
-        DeviceData device{};
-
-    private:
-        void initialize(const Config& config);
+        } device;
     };
 } // namespace kfs::solver

@@ -41,12 +41,12 @@ namespace kfs::inspector {
     };
 
     export struct Inspector final {
-        explicit Inspector(const solver::KeyframeSmoke& smoke);
+        explicit Inspector(const solver::Solver& smoke);
 
         [[nodiscard]] SolverDeviceView device_view() const;
         [[nodiscard]] FrameSnapshot read_frame(int frame_index) const;
         [[nodiscard]] FrameStats frame_stats(int frame_index) const;
 
-        const solver::KeyframeSmoke* smoke = nullptr;
+        const solver::Solver* smoke = nullptr;
     };
 } // namespace kfs::inspector

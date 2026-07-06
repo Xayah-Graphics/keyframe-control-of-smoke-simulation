@@ -53,7 +53,7 @@ int main(const int argc, const char* const* const argv) {
             return 1;
         }
 
-        kfs::solver::KeyframeSmoke smoke{};
+        kfs::solver::Solver smoke{};
         for (std::uint32_t frame = 0; frame < frames; ++frame) {
             const std::expected<kfs::solver::StepStats, std::string> stats = smoke.step(kfs::solver::StepRequest{
                 .delta_seconds = delta_seconds,

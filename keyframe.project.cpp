@@ -173,7 +173,7 @@ namespace kfs::project {
 #endif
         }
 
-        [[nodiscard]] std::array<float, 3u> domain_size(const solver::KeyframeSmoke& smoke) {
+        [[nodiscard]] std::array<float, 3u> domain_size(const solver::Solver& smoke) {
             return {
                 static_cast<float>(smoke.host.nx) * smoke.host.cell_size,
                 static_cast<float>(smoke.host.ny) * smoke.host.cell_size,
@@ -181,7 +181,7 @@ namespace kfs::project {
             };
         }
 
-        [[nodiscard]] plugin::Camera overview_camera(const solver::KeyframeSmoke& smoke) {
+        [[nodiscard]] plugin::Camera overview_camera(const solver::Solver& smoke) {
             const std::array size = domain_size(smoke);
             return plugin::Camera{
                 .name                 = "Overview",
@@ -196,7 +196,7 @@ namespace kfs::project {
             };
         }
 
-        [[nodiscard]] plugin::ViewportSegmentSet domain_box(const solver::KeyframeSmoke& smoke) {
+        [[nodiscard]] plugin::ViewportSegmentSet domain_box(const solver::Solver& smoke) {
             const std::array minimum{0.0f, 0.0f, 0.0f};
             const std::array maximum = domain_size(smoke);
             const std::array corners = {
@@ -256,7 +256,7 @@ namespace kfs::project {
         DebugOptions debug{};
         std::shared_ptr<plugin::HostServices> host_services{};
         ExternalGpuBuffer density_buffer{};
-        std::unique_ptr<solver::KeyframeSmoke> smoke{};
+        std::unique_ptr<solver::Solver> smoke{};
         std::optional<plugin::VolumeGrid> density_volume{};
         std::optional<plugin::ViewportSegmentSet> domain_segments{};
         plugin::DebugAttachmentSet debug_attachments{};
@@ -488,7 +488,7 @@ namespace kfs::project {
         state->open         = options;
         state->debug        = DebugOptions{.density_scale = options.density_scale};
         state->host_services = std::move(context.host_services);
-        state->smoke        = std::make_unique<solver::KeyframeSmoke>(options.config);
+        state->smoke        = std::make_unique<solver::Solver>(options.config);
         publish_domain_if_ready(*state);
         state->latest_frame_stats = inspector::Inspector{*state->smoke}.frame_stats(static_cast<int>(state->smoke->host.current_step));
         return Project{std::move(state)};
