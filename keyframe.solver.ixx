@@ -6,6 +6,7 @@ module;
 export module keyframe.solver;
 import std;
 export import keyframe.field;
+export import keyframe.operators.advection;
 
 namespace kfs::solver {
     export enum class FlowBoundaryType : std::uint32_t {
@@ -19,11 +20,6 @@ namespace kfs::solver {
         fixed_value = 0,
         zero_flux   = 1,
         periodic    = 2,
-    };
-
-    export enum class ScalarAdvectionMode : std::uint32_t {
-        linear          = 0,
-        monotonic_cubic = 1,
     };
 
     export struct FlowBoundaryFace final {
@@ -65,7 +61,7 @@ namespace kfs::solver {
         float buoyancy_density_factor{0.15f};
         float buoyancy_temperature_factor{1.2f};
         float vorticity_confinement{0.22f};
-        ScalarAdvectionMode scalar_advection_mode{ScalarAdvectionMode::monotonic_cubic};
+        operators::Advection::Scheme advection_scheme{operators::Advection::Scheme::monotonic_cubic};
         FlowBoundary flow_boundary{};
         ScalarBoundary density_boundary{};
         ScalarBoundary temperature_boundary{};
@@ -110,7 +106,6 @@ namespace kfs::solver {
             float buoyancy_density_factor{0.0f};
             float buoyancy_temperature_factor{0.0f};
             float vorticity_confinement{0.0f};
-            std::uint32_t scalar_advection_mode{1};
             std::array<std::uint32_t, 6> flow_boundary_types{};
             std::array<float, 18> flow_boundary_velocity{};
             std::array<float, 6> flow_boundary_pressure{};
@@ -165,5 +160,8 @@ namespace kfs::solver {
             float* pressure_one{nullptr};
             void* spmv_buffer{nullptr};
         } device;
+
+    private:
+        std::optional<operators::Advection> advection{};
     };
 } // namespace kfs::solver

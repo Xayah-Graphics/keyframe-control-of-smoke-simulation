@@ -9,6 +9,7 @@ module;
 module keyframe.solver;
 import std;
 import keyframe.field;
+import keyframe.operators.advection;
 
 namespace kfs::solver {
     namespace {
@@ -73,34 +74,6 @@ namespace kfs::solver {
             if (source.falloff <= 0.0f) throw std::runtime_error{"Keyframe smoke plume source falloff must be positive"};
         }
 
-        unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
-            return static_cast<unsigned>((value + divisor - 1u) / divisor);
-        }
-
-        unsigned linear_launch_grid(const std::uint64_t count) {
-            if (count == 0u) throw std::runtime_error{"Keyframe smoke launch count must be positive"};
-            return ceil_div_u32(count, 256u);
-        }
-
-        dim3 scalar_launch_grid(const field::ScalarField3D& field) {
-            if (field.count() == 0u) throw std::runtime_error{"Keyframe smoke scalar launch resolution is empty"};
-            const dim3 block{8u, 8u, 4u};
-            const auto& resolution = field.resolution;
-            return dim3(ceil_div_u32(static_cast<std::uint64_t>(resolution[0]), block.x), ceil_div_u32(static_cast<std::uint64_t>(resolution[1]), block.y), ceil_div_u32(static_cast<std::uint64_t>(resolution[2]), block.z));
-        }
-
-        dim3 staggered_launch_grid(const field::StaggeredVectorField3D& field, const std::uint32_t axis) {
-            if (field.count(axis) == 0u) throw std::runtime_error{"Keyframe smoke staggered launch resolution is empty"};
-            const dim3 block{8u, 8u, 4u};
-            const auto& resolution = field.resolution;
-            const auto nx          = static_cast<std::uint64_t>(resolution[0]);
-            const auto ny          = static_cast<std::uint64_t>(resolution[1]);
-            const auto nz          = static_cast<std::uint64_t>(resolution[2]);
-            if (axis == 0u) return dim3(ceil_div_u32(nx + 1u, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz, block.z));
-            if (axis == 1u) return dim3(ceil_div_u32(nx, block.x), ceil_div_u32(ny + 1u, block.y), ceil_div_u32(nz, block.z));
-            return dim3(ceil_div_u32(nx, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz + 1u, block.z));
-        }
-
         int wrap_index(const int value, const int size) {
             const int remainder = value % size;
             return remainder < 0 ? remainder + size : remainder;
@@ -108,14 +81,6 @@ namespace kfs::solver {
 
         std::uint64_t index_3d(const int x, const int y, const int z, const int nx, const int ny) {
             return static_cast<std::uint64_t>(x) + static_cast<std::uint64_t>(nx) * (static_cast<std::uint64_t>(y) + static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(z));
-        }
-
-        std::array<dim3, 3> make_sync_velocity_grid(const std::int32_t nx, const std::int32_t ny, const std::int32_t nz, const dim3& block) {
-            return {
-                dim3(ceil_div_u32(static_cast<std::uint64_t>(ny), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u),
-                dim3(ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u),
-                dim3(ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), 1u),
-            };
         }
 
         void add_pressure_column(std::array<int, 7>& row_columns, int& row_entry_count, const int column) {
@@ -146,7 +111,6 @@ namespace kfs::solver {
             host.buoyancy_density_factor     = config.buoyancy_density_factor;
             host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
             host.vorticity_confinement       = config.vorticity_confinement;
-            host.scalar_advection_mode       = static_cast<std::uint32_t>(config.scalar_advection_mode);
             write_flow_boundary(config.flow_boundary, host.flow_boundary_types, host.flow_boundary_velocity, host.flow_boundary_pressure);
             write_scalar_boundary(config.density_boundary, host.density_boundary_types, host.density_boundary_values);
             write_scalar_boundary(config.temperature_boundary, host.temperature_boundary_types, host.temperature_boundary_values);
@@ -325,13 +289,11 @@ namespace kfs::solver {
             const auto cell_bytes           = device.density_data.bytes();
             const int cell_count_int        = static_cast<int>(cell_count);
             const std::uint32_t* flow_types = host.flow_boundary_types.data();
-            const float* flow_velocity      = host.flow_boundary_velocity.data();
             const float* flow_pressure      = host.flow_boundary_pressure.data();
-            const dim3 block{8u, 8u, 4u};
-            cuda::fill_int(smoke.host.stream, 1u, 1u, smoke.device.pressure_anchor, cell_count_int, 1u);
-            cuda::find_pressure_anchor(smoke.host.stream, linear_launch_grid(cell_count), 256u, smoke.device.pressure_anchor, device.occupancy, cell_count);
-            cuda::compute_projection_rhs(smoke.host.stream, scalar_launch_grid(device.density_data), block, smoke.device.pressure_rhs, device.temp_velocity.data[0], device.temp_velocity.data[1], device.temp_velocity.data[2], device.occupancy, smoke.device.pressure_anchor, host.nx, host.ny, host.nz, host.cell_size, delta_seconds, flow_types, flow_velocity, flow_pressure);
-            cuda::build_projection_matrix(smoke.host.stream, linear_launch_grid(cell_count), 256u, smoke.device.pressure_values, smoke.device.pressure_row_offsets, smoke.device.pressure_column_indices, device.occupancy, smoke.device.pressure_anchor, host.nx, host.ny, host.nz, flow_types, flow_velocity, flow_pressure);
+            cuda::fill_int(smoke.host.stream, smoke.device.pressure_anchor, cell_count_int, 1u);
+            cuda::find_pressure_anchor(smoke.host.stream, smoke.device.pressure_anchor, device.occupancy, cell_count);
+            cuda::compute_projection_rhs(smoke.host.stream, smoke.device.pressure_rhs, device.temp_velocity.data[0], device.temp_velocity.data[1], device.temp_velocity.data[2], device.occupancy, smoke.device.pressure_anchor, host.nx, host.ny, host.nz, host.cell_size, delta_seconds, flow_types, flow_pressure);
+            cuda::build_projection_matrix(smoke.host.stream, smoke.device.pressure_values, smoke.device.pressure_row_offsets, smoke.device.pressure_column_indices, device.occupancy, smoke.device.pressure_anchor, host.nx, host.ny, host.nz, flow_types);
             if (const cudaError_t status = cudaMemsetAsync(smoke.device.pressure, 0, cell_bytes, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pressure: "} + cudaGetErrorString(status)};
             if (const cublasStatus_t status = cublasScopy(smoke.host.cublas, cell_count_int, smoke.device.pressure_rhs, 1, smoke.device.pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy rhs"};
             if (const cublasStatus_t status = cublasScopy(smoke.host.cublas, cell_count_int, smoke.device.pcg_r, 1, smoke.device.pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy pcg_p"};
@@ -361,14 +323,17 @@ namespace kfs::solver {
             this->device = {};
             initialize_host(this->host, config);
             create_device(*this);
+            this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
             this->set_plume_source(this->host.plume_source);
         } catch (...) {
+            this->advection.reset();
             destroy_device(*this);
             throw;
         }
     }
 
     Solver::~Solver() noexcept {
+        this->advection.reset();
         destroy_device(*this);
     }
 
@@ -426,17 +391,10 @@ namespace kfs::solver {
         try {
             if (!std::isfinite(request.delta_seconds) || request.delta_seconds < 0.0f) throw std::runtime_error{"Keyframe smoke delta_seconds must be finite and non-negative"};
             if (request.iterations < 1) throw std::runtime_error{"Keyframe smoke step iterations must be positive"};
-            auto& host             = this->host;
-            auto& device           = this->device;
-            const auto cell_count  = device.density_data.count();
-            const auto linear_grid = linear_launch_grid(cell_count);
-            const dim3 block{8u, 8u, 4u};
-            const auto cell_grid = scalar_launch_grid(device.density_data);
-            const dim3 sync_block{block.x, block.y, 1u};
-            const auto sync_velocity_grid   = make_sync_velocity_grid(host.nx, host.ny, host.nz, block);
+            auto& host   = this->host;
+            auto& device = this->device;
             const std::uint32_t* flow_types = host.flow_boundary_types.data();
             const float* flow_velocity      = host.flow_boundary_velocity.data();
-            const float* flow_pressure      = host.flow_boundary_pressure.data();
             const std::array<bool, 3> periodic{
                 host.flow_boundary_types[0] == flow_boundary_periodic && host.flow_boundary_types[1] == flow_boundary_periodic,
                 host.flow_boundary_types[2] == flow_boundary_periodic && host.flow_boundary_types[3] == flow_boundary_periodic,
@@ -446,38 +404,35 @@ namespace kfs::solver {
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
-                    cuda::apply_solid_scalar(host.stream, linear_grid, 256u, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
+                    cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
                     field::center_staggered(host.stream, device.centered_velocity, device.velocity);
-                    cuda::compute_vorticity(host.stream, cell_grid, block, device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.centered_velocity.data[0], device.centered_velocity.data[1], device.centered_velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, flow_types, flow_velocity, flow_pressure);
+                    cuda::compute_vorticity(host.stream, device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.centered_velocity.data[0], device.centered_velocity.data[1], device.centered_velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, flow_types, flow_velocity);
                     device.force.fill(host.stream, 0.0f);
-                    cuda::add_buoyancy(host.stream, cell_grid, block, device.force.data[1], device.density_data.data, device.temperature_data.data, device.occupancy, host.nx, host.ny, host.nz, host.ambient_temperature, host.buoyancy_density_factor, host.buoyancy_temperature_factor, flow_types, flow_velocity, flow_pressure);
-                    cuda::add_vorticity_confinement(host.stream, cell_grid, block, device.force.data[0], device.force.data[1], device.force.data[2], device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.occupancy, host.nx, host.ny, host.nz, host.cell_size, host.vorticity_confinement, flow_types, flow_velocity, flow_pressure);
+                    cuda::add_buoyancy(host.stream, device.force.data[1], device.density_data.data, device.temperature_data.data, device.occupancy, host.nx, host.ny, host.nz, host.ambient_temperature, host.buoyancy_density_factor, host.buoyancy_temperature_factor, flow_types);
+                    cuda::add_vorticity_confinement(host.stream, device.force.data[0], device.force.data[1], device.force.data[2], device.vorticity.data[0], device.vorticity.data[1], device.vorticity.data[2], device.vorticity_magnitude.data, device.occupancy, host.nx, host.ny, host.nz, host.cell_size, host.vorticity_confinement, flow_types);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        const dim3 velocity_grid = staggered_launch_grid(device.velocity, axis);
                         field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);
-                        cuda::enforce_staggered_boundary(host.stream, velocity_grid, block, axis, device.velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity, flow_pressure);
-                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, sync_velocity_grid[axis], sync_block, axis, device.velocity.data[axis], host.nx, host.ny, host.nz);
+                        cuda::enforce_staggered_boundary(host.stream, axis, device.velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
+                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.velocity.data[axis], host.nx, host.ny, host.nz);
                     }
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        const dim3 velocity_grid = staggered_launch_grid(device.velocity, axis);
-                        cuda::advect_staggered_component(host.stream, velocity_grid, block, axis, device.temp_velocity.data[axis], device.velocity.data[axis], device.velocity.data[0], device.velocity.data[1], device.velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, delta_seconds, host.scalar_advection_mode, flow_types, flow_velocity, flow_pressure);
-                        cuda::enforce_staggered_boundary(host.stream, velocity_grid, block, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity, flow_pressure);
-                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, sync_velocity_grid[axis], sync_block, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
+                        (*this->advection)(device.temp_velocity, axis, device.velocity, device.velocity, device.occupancy, delta_seconds, flow_types, flow_velocity);
+                        cuda::enforce_staggered_boundary(host.stream, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
+                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
                     }
                     solve_pressure(*this, delta_seconds);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        const dim3 velocity_grid = staggered_launch_grid(device.temp_velocity, axis);
-                        cuda::project_staggered_component(host.stream, velocity_grid, block, axis, device.temp_velocity.data[axis], device.pressure, device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, host.cell_size, delta_seconds, flow_types, flow_velocity, flow_pressure);
-                        cuda::enforce_staggered_boundary(host.stream, velocity_grid, block, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity, flow_pressure);
-                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, sync_velocity_grid[axis], sync_block, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
+                        cuda::project_staggered_component(host.stream, axis, device.temp_velocity.data[axis], device.pressure, device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, host.cell_size, delta_seconds, flow_types, flow_velocity);
+                        cuda::enforce_staggered_boundary(host.stream, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
+                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
                         field::copy_staggered_component(host.stream, device.velocity, axis, device.temp_velocity);
                     }
                     field::add_scaled(host.stream, device.temperature_temp, device.temperature_data, device.temperature_source, delta_seconds);
-                    cuda::advect_centered_scalar(host.stream, cell_grid, block, device.temperature_data.data, device.temperature_temp.data, device.velocity.data[0], device.velocity.data[1], device.velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, delta_seconds, host.scalar_advection_mode, host.temperature_boundary_types.data(), host.temperature_boundary_values.data(), flow_types, flow_velocity, flow_pressure);
-                    cuda::apply_solid_scalar(host.stream, linear_grid, 256u, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
+                    (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.temperature_boundary_types.data(), host.temperature_boundary_values.data(), flow_types, flow_velocity);
+                    cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
                     field::add_scaled(host.stream, device.density_temp, device.density_data, device.density_source, delta_seconds);
-                    cuda::advect_centered_scalar(host.stream, cell_grid, block, device.density_data.data, device.density_temp.data, device.velocity.data[0], device.velocity.data[1], device.velocity.data[2], device.occupancy, host.nx, host.ny, host.nz, host.cell_size, delta_seconds, host.scalar_advection_mode, host.density_boundary_types.data(), host.density_boundary_values.data(), flow_types, flow_velocity, flow_pressure);
-                    cuda::boundary_fill_centered_scalar(host.stream, cell_grid, block, device.density_temp.data, device.density_data.data, device.occupancy, host.nx, host.ny, host.nz, host.density_boundary_types.data(), host.density_boundary_values.data());
+                    (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.density_boundary_types.data(), host.density_boundary_values.data(), flow_types, flow_velocity);
+                    cuda::boundary_fill_centered_scalar(host.stream, device.density_temp.data, device.density_data.data, device.occupancy, host.nx, host.ny, host.nz, host.density_boundary_types.data(), host.density_boundary_values.data());
                     field::copy(host.stream, device.density_data, device.density_temp);
                     ++this->host.current_step;
                 }
