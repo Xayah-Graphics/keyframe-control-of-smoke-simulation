@@ -796,6 +796,15 @@ namespace kfs::cuda {
         traced.z = start.z + (traced.z - start.z) * lo;
         return traced;
     }
+
+    __global__ void apply_solid_temperature_kernel(float* temperature, const uint8_t* occupancy, const float* solid_temperature, const int nx, const int ny, const int nz, const float ambient_temperature) {
+        const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+        const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
+        if (index >= count) return;
+        if (occupancy == nullptr || occupancy[index] == 0) return;
+        temperature[index] = solid_temperature != nullptr ? solid_temperature[index] : ambient_temperature;
+    }
+
     __global__ void compute_vorticity_kernel(float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* cell_x, const float* cell_y, const float* cell_z, const uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const SmokeSimulationFlowBoundaryConfig boundary) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -1079,77 +1088,6 @@ namespace kfs::cuda {
         const float3 start                             = make_float3((static_cast<float>(i) + 0.5f) * h, (static_cast<float>(j) + 0.5f) * h, static_cast<float>(k) * h);
         const auto [p_x, p_y, p_z]                     = trace_particle_rk2(start, velocity_x, velocity_y, velocity_z, occupancy, dt, nx, ny, nz, h, boundary);
         destination[index_velocity_z(i, j, k, nx, ny)] = advection_mode == SMOKE_SIMULATION_SCALAR_ADVECTION_MONOTONIC_CUBIC ? sample_velocity_z_cubic(source, p_x, p_y, p_z, nx, ny, nz, h, boundary) : sample_velocity_z(source, p_x, p_y, p_z, nx, ny, nz, h, boundary);
-    }
-
-    __global__ void advect_scalar_kernel(float* destination, const float* source, const float* velocity_x, const float* velocity_y, const float* velocity_z, const uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const float dt, const uint32_t advection_mode, const SmokeSimulationScalarBoundaryConfig scalar_boundary, const SmokeSimulationFlowBoundaryConfig flow_boundary) {
-        const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
-        const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-        const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
-        if (x >= nx || y >= ny || z >= nz) return;
-        if (load_occupancy(occupancy, x, y, z, nx, ny, nz, flow_boundary)) {
-            destination[index_3d(x, y, z, nx, ny)] = 0.0f;
-            return;
-        }
-        const float3 start                     = make_float3((static_cast<float>(x) + 0.5f) * h, (static_cast<float>(y) + 0.5f) * h, (static_cast<float>(z) + 0.5f) * h);
-        const auto [p_x, p_y, p_z]             = trace_particle_rk2(start, velocity_x, velocity_y, velocity_z, occupancy, dt, nx, ny, nz, h, flow_boundary);
-        destination[index_3d(x, y, z, nx, ny)] = advection_mode == SMOKE_SIMULATION_SCALAR_ADVECTION_MONOTONIC_CUBIC ? sample_scalar_cubic(source, p_x, p_y, p_z, nx, ny, nz, h, scalar_boundary) : sample_scalar_linear(source, p_x, p_y, p_z, nx, ny, nz, h, scalar_boundary);
-    }
-
-    __global__ void apply_solid_temperature_kernel(float* temperature, const uint8_t* occupancy, const float* solid_temperature, const int nx, const int ny, const int nz, const float ambient_temperature) {
-        const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
-        const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        if (index >= count) return;
-        if (occupancy == nullptr || occupancy[index] == 0) return;
-        temperature[index] = solid_temperature != nullptr ? solid_temperature[index] : ambient_temperature;
-    }
-
-    __global__ void boundary_fill_density_kernel(float* destination, const float* source, const uint8_t* occupancy, const int nx, const int ny, const int nz, const SmokeSimulationScalarBoundaryConfig boundary) {
-        const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
-        const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-        const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
-        if (x >= nx || y >= ny || z >= nz) return;
-
-        const auto index = index_3d(x, y, z, nx, ny);
-        if (occupancy == nullptr || occupancy[index] == 0) {
-            destination[index] = source[index];
-            return;
-        }
-
-        int max_radius = nx;
-        if (ny > max_radius) max_radius = ny;
-        if (nz > max_radius) max_radius = nz;
-        for (int radius = 1; radius <= max_radius; ++radius) {
-            bool found         = false;
-            float best_value   = 0.0f;
-            int best_distance2 = 0;
-            for (int dz = -radius; dz <= radius; ++dz) {
-                for (int dy = -radius; dy <= radius; ++dy) {
-                    for (int dx = -radius; dx <= radius; ++dx) {
-                        int shell_radius = abs(dx);
-                        if (abs(dy) > shell_radius) shell_radius = abs(dy);
-                        if (abs(dz) > shell_radius) shell_radius = abs(dz);
-                        if (shell_radius != radius) continue;
-                        int next_x = x + dx;
-                        int next_y = y + dy;
-                        int next_z = z + dz;
-                        if (!resolve_scalar_cell_coordinates(next_x, next_y, next_z, nx, ny, nz, boundary)) continue;
-                        const auto neighbor_index = index_3d(next_x, next_y, next_z, nx, ny);
-                        if (occupancy[neighbor_index] != 0) continue;
-                        const int distance2 = dx * dx + dy * dy + dz * dz;
-                        if (!found || distance2 < best_distance2) {
-                            found          = true;
-                            best_distance2 = distance2;
-                            best_value     = source[neighbor_index];
-                        }
-                    }
-                }
-            }
-            if (found) {
-                destination[index] = best_value;
-                return;
-            }
-        }
-        destination[index] = 0.0f;
     }
 
     __global__ void fill_int_kernel(int* field, const int value, const std::uint64_t count) {
@@ -1450,9 +1388,72 @@ namespace kfs::cuda {
         }
     }
 
-    void fill_int(cudaStream_t stream, const unsigned grid, const unsigned block, int* field, const int value, const std::uint64_t count) {
-        fill_int_kernel<<<grid, block, 0, stream>>>(field, value, count);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_int_kernel: "} + cudaGetErrorString(status)};
+    __global__ void advect_scalar_kernel(float* destination, const float* source, const float* velocity_x, const float* velocity_y, const float* velocity_z, const uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const float dt, const uint32_t advection_mode, const SmokeSimulationScalarBoundaryConfig scalar_boundary, const SmokeSimulationFlowBoundaryConfig flow_boundary) {
+        const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
+        if (x >= nx || y >= ny || z >= nz) return;
+        if (load_occupancy(occupancy, x, y, z, nx, ny, nz, flow_boundary)) {
+            destination[index_3d(x, y, z, nx, ny)] = 0.0f;
+            return;
+        }
+        const float3 start                     = make_float3((static_cast<float>(x) + 0.5f) * h, (static_cast<float>(y) + 0.5f) * h, (static_cast<float>(z) + 0.5f) * h);
+        const auto [p_x, p_y, p_z]             = trace_particle_rk2(start, velocity_x, velocity_y, velocity_z, occupancy, dt, nx, ny, nz, h, flow_boundary);
+        destination[index_3d(x, y, z, nx, ny)] = advection_mode == SMOKE_SIMULATION_SCALAR_ADVECTION_MONOTONIC_CUBIC ? sample_scalar_cubic(source, p_x, p_y, p_z, nx, ny, nz, h, scalar_boundary) : sample_scalar_linear(source, p_x, p_y, p_z, nx, ny, nz, h, scalar_boundary);
+    }
+
+    __global__ void boundary_fill_density_kernel(float* destination, const float* source, const uint8_t* occupancy, const int nx, const int ny, const int nz, const SmokeSimulationScalarBoundaryConfig boundary) {
+        const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+        const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+        const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
+        if (x >= nx || y >= ny || z >= nz) return;
+
+        const auto index = index_3d(x, y, z, nx, ny);
+        if (occupancy == nullptr || occupancy[index] == 0) {
+            destination[index] = source[index];
+            return;
+        }
+
+        int max_radius = nx;
+        if (ny > max_radius) max_radius = ny;
+        if (nz > max_radius) max_radius = nz;
+        for (int radius = 1; radius <= max_radius; ++radius) {
+            bool found         = false;
+            float best_value   = 0.0f;
+            int best_distance2 = 0;
+            for (int dz = -radius; dz <= radius; ++dz) {
+                for (int dy = -radius; dy <= radius; ++dy) {
+                    for (int dx = -radius; dx <= radius; ++dx) {
+                        int shell_radius = abs(dx);
+                        if (abs(dy) > shell_radius) shell_radius = abs(dy);
+                        if (abs(dz) > shell_radius) shell_radius = abs(dz);
+                        if (shell_radius != radius) continue;
+                        int next_x = x + dx;
+                        int next_y = y + dy;
+                        int next_z = z + dz;
+                        if (!resolve_scalar_cell_coordinates(next_x, next_y, next_z, nx, ny, nz, boundary)) continue;
+                        const auto neighbor_index = index_3d(next_x, next_y, next_z, nx, ny);
+                        if (occupancy[neighbor_index] != 0) continue;
+                        const int distance2 = dx * dx + dy * dy + dz * dz;
+                        if (!found || distance2 < best_distance2) {
+                            found          = true;
+                            best_distance2 = distance2;
+                            best_value     = source[neighbor_index];
+                        }
+                    }
+                }
+            }
+            if (found) {
+                destination[index] = best_value;
+                return;
+            }
+        }
+        destination[index] = 0.0f;
+    }
+
+    void apply_solid_scalar(cudaStream_t stream, const unsigned grid, const unsigned block, float* scalar, const std::uint8_t* occupancy, const float* solid_scalar, const int nx, const int ny, const int nz, const float default_value) {
+        apply_solid_temperature_kernel<<<grid, block, 0, stream>>>(scalar, occupancy, solid_scalar, nx, ny, nz, default_value);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"apply_solid_temperature_kernel: "} + cudaGetErrorString(status)};
     }
 
     void compute_vorticity(cudaStream_t stream, const dim3 grid, const dim3 block, float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* cell_x, const float* cell_y, const float* cell_z, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const std::uint32_t* flow_boundary_types, const float* flow_boundary_velocity, const float* flow_boundary_pressure) {
@@ -1499,22 +1500,9 @@ namespace kfs::cuda {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_staggered_component_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void advect_centered_scalar(cudaStream_t stream, const dim3 grid, const dim3 block, float* destination, const float* source, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values, const std::uint32_t* flow_boundary_types, const float* flow_boundary_velocity, const float* flow_boundary_pressure) {
-        const SmokeSimulationScalarBoundaryConfig scalar_boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
-        const SmokeSimulationFlowBoundaryConfig flow_boundary     = make_flow_boundary(flow_boundary_types, flow_boundary_velocity, flow_boundary_pressure);
-        advect_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, velocity_x, velocity_y, velocity_z, occupancy, nx, ny, nz, h, dt, advection_mode, scalar_boundary, flow_boundary);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_scalar_kernel: "} + cudaGetErrorString(status)};
-    }
-
-    void apply_solid_scalar(cudaStream_t stream, const unsigned grid, const unsigned block, float* scalar, const std::uint8_t* occupancy, const float* solid_scalar, const int nx, const int ny, const int nz, const float default_value) {
-        apply_solid_temperature_kernel<<<grid, block, 0, stream>>>(scalar, occupancy, solid_scalar, nx, ny, nz, default_value);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"apply_solid_temperature_kernel: "} + cudaGetErrorString(status)};
-    }
-
-    void boundary_fill_centered_scalar(cudaStream_t stream, const dim3 grid, const dim3 block, float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
-        const SmokeSimulationScalarBoundaryConfig boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
-        boundary_fill_density_kernel<<<grid, block, 0, stream>>>(destination, source, occupancy, nx, ny, nz, boundary);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary_fill_density_kernel: "} + cudaGetErrorString(status)};
+    void fill_int(cudaStream_t stream, const unsigned grid, const unsigned block, int* field, const int value, const std::uint64_t count) {
+        fill_int_kernel<<<grid, block, 0, stream>>>(field, value, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_int_kernel: "} + cudaGetErrorString(status)};
     }
 
     void find_pressure_anchor(cudaStream_t stream, const unsigned grid, const unsigned block, int* pressure_anchor, const std::uint8_t* occupancy, const std::uint64_t count) {
@@ -1551,6 +1539,19 @@ namespace kfs::cuda {
         if (axis == 1u) project_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, occupancy, solid_velocity_component, nx, ny, nz, h, dt, boundary);
         if (axis == 2u) project_velocity_z_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, occupancy, solid_velocity_component, nx, ny, nz, h, dt, boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"project_staggered_component_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void advect_centered_scalar(cudaStream_t stream, const dim3 grid, const dim3 block, float* destination, const float* source, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values, const std::uint32_t* flow_boundary_types, const float* flow_boundary_velocity, const float* flow_boundary_pressure) {
+        const SmokeSimulationScalarBoundaryConfig scalar_boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
+        const SmokeSimulationFlowBoundaryConfig flow_boundary     = make_flow_boundary(flow_boundary_types, flow_boundary_velocity, flow_boundary_pressure);
+        advect_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, velocity_x, velocity_y, velocity_z, occupancy, nx, ny, nz, h, dt, advection_mode, scalar_boundary, flow_boundary);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_scalar_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void boundary_fill_centered_scalar(cudaStream_t stream, const dim3 grid, const dim3 block, float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
+        const SmokeSimulationScalarBoundaryConfig boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
+        boundary_fill_density_kernel<<<grid, block, 0, stream>>>(destination, source, occupancy, nx, ny, nz, boundary);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary_fill_density_kernel: "} + cudaGetErrorString(status)};
     }
 
 } // namespace kfs::cuda
