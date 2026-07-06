@@ -7,6 +7,7 @@ import std;
 import keyframe.field;
 import keyframe.boundary;
 import keyframe.operators.advection;
+import keyframe.operators.emitter;
 import keyframe.operators.buoyancy;
 import keyframe.operators.projection;
 import keyframe.operators.solid;
@@ -27,13 +28,6 @@ namespace kfs::solver {
             if (cell_count == 0 || cell_count > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke cell count exceeds pressure solver int range");
         }
 
-        void validate_source(const PlumeSource& source) {
-            if (source.radius[0] <= 0.0f || source.radius[1] <= 0.0f || source.radius[2] <= 0.0f) throw std::runtime_error{"Keyframe smoke plume source radius must be positive"};
-            if (source.density < 0.0f) throw std::runtime_error{"Keyframe smoke plume source density must be non-negative"};
-            if (source.temperature < 0.0f) throw std::runtime_error{"Keyframe smoke plume source temperature must be non-negative"};
-            if (source.falloff <= 0.0f) throw std::runtime_error{"Keyframe smoke plume source falloff must be positive"};
-        }
-
         void initialize_host(Solver::HostData& host, const Config& config) {
             host.nx                  = static_cast<std::int32_t>(config.resolution[0]);
             host.ny                  = static_cast<std::int32_t>(config.resolution[1]);
@@ -41,18 +35,13 @@ namespace kfs::solver {
             host.cell_size           = config.cell_size;
             host.ambient_temperature = config.ambient_temperature;
             host.boundary            = boundary::pack(config.boundary);
-            const auto cell_count    = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
-            host.density_source.resize(cell_count, 0.0f);
-            host.temperature_source.resize(cell_count, 0.0f);
         }
 
         void initialize_field_buffers(const Solver::HostData& host, Solver::DeviceData& device) {
             field::fill(host.stream, device.density_data, 0.0f);
             field::fill(host.stream, device.density_temp, 0.0f);
-            field::fill(host.stream, device.density_source, 0.0f);
             field::fill(host.stream, device.temperature_data, host.ambient_temperature);
             field::fill(host.stream, device.temperature_temp, host.ambient_temperature);
-            field::fill(host.stream, device.temperature_source, 0.0f);
             field::fill(host.stream, device.force, 0.0f);
             field::fill(host.stream, device.solid_velocity, 0.0f);
             field::fill(host.stream, device.velocity, 0.0f);
@@ -85,10 +74,8 @@ namespace kfs::solver {
                 const std::array resolution{host.nx, host.ny, host.nz};
                 device.density_data.resize(resolution);
                 device.density_temp.resize(resolution);
-                device.density_source.resize(resolution);
                 device.temperature_data.resize(resolution);
                 device.temperature_temp.resize(resolution);
-                device.temperature_source.resize(resolution);
                 device.force.resize(resolution);
                 device.solid_velocity.resize(resolution);
                 device.velocity.resize(resolution);
@@ -115,16 +102,17 @@ namespace kfs::solver {
             initialize_host(this->host, config);
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
+            this->emitter.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.emitter);
             this->buoyancy.emplace(this->host.stream, this->host.ambient_temperature, config.buoyancy_density_factor, config.buoyancy_temperature_factor, this->host.boundary.flow);
             this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
             this->solid.emplace(this->host.stream);
             this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.flow);
-            this->set_plume_source(this->host.plume_source);
         } catch (...) {
             this->vorticity.reset();
             this->solid.reset();
             this->projection.reset();
             this->buoyancy.reset();
+            this->emitter.reset();
             this->advection.reset();
             destroy_device(*this);
             throw;
@@ -136,57 +124,9 @@ namespace kfs::solver {
         this->solid.reset();
         this->projection.reset();
         this->buoyancy.reset();
+        this->emitter.reset();
         this->advection.reset();
         destroy_device(*this);
-    }
-
-    void Solver::set_plume_source(const PlumeSource& source) {
-        validate_source(source);
-        this->host.plume_source = source;
-        std::ranges::fill(this->host.density_source, 0.0f);
-        std::ranges::fill(this->host.temperature_source, 0.0f);
-
-        const auto nx = static_cast<std::uint32_t>(this->host.nx);
-        const auto ny = static_cast<std::uint32_t>(this->host.ny);
-        const auto nz = static_cast<std::uint32_t>(this->host.nz);
-        const std::array extent{
-            static_cast<float>(nx) * this->host.cell_size,
-            static_cast<float>(ny) * this->host.cell_size,
-            static_cast<float>(nz) * this->host.cell_size,
-        };
-        const std::array center{
-            source.center[0] * extent[0],
-            source.center[1] * extent[1],
-            source.center[2] * extent[2],
-        };
-        const std::array radius{
-            source.radius[0] * extent[0],
-            source.radius[1] * extent[1],
-            source.radius[2] * extent[2],
-        };
-
-        for (std::uint32_t z = 0; z < nz; ++z) {
-            for (std::uint32_t y = 0; y < ny; ++y) {
-                for (std::uint32_t x = 0; x < nx; ++x) {
-                    const std::size_t index = static_cast<std::size_t>(x) + static_cast<std::size_t>(nx) * (static_cast<std::size_t>(y) + static_cast<std::size_t>(ny) * static_cast<std::size_t>(z));
-                    const float px          = (static_cast<float>(x) + 0.5f) * this->host.cell_size;
-                    const float py          = (static_cast<float>(y) + 0.5f) * this->host.cell_size;
-                    const float pz          = (static_cast<float>(z) + 0.5f) * this->host.cell_size;
-                    const float dx          = (px - center[0]) / radius[0];
-                    const float dy          = (py - center[1]) / radius[1];
-                    const float dz          = (pz - center[2]) / radius[2];
-                    const float r2          = dx * dx + dy * dy + dz * dz;
-                    if (r2 > 1.0f) continue;
-                    const float plume                    = std::exp(-source.falloff * r2);
-                    this->host.density_source[index]     = source.density * plume;
-                    this->host.temperature_source[index] = source.temperature * plume;
-                }
-            }
-        }
-
-        field::upload(this->host.stream, this->device.density_source, std::span<const float>{this->host.density_source.data(), this->host.density_source.size()});
-        field::upload(this->host.stream, this->device.temperature_source, std::span<const float>{this->host.temperature_source.data(), this->host.temperature_source.size()});
-        if (const cudaError_t status = cudaStreamSynchronize(this->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize plume source: "} + cudaGetErrorString(status)};
     }
 
     std::expected<StepStats, std::string> Solver::step(const StepRequest& request) {
@@ -216,10 +156,9 @@ namespace kfs::solver {
                         if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity);
                     }
                     (*this->projection)(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, delta_seconds);
-                    field::add_scaled(host.stream, device.temperature_temp, device.temperature_data, device.temperature_source, delta_seconds);
+                    (*this->emitter)(device.density_temp, device.density_data, device.temperature_temp, device.temperature_data, delta_seconds);
                     (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
                     this->solid->apply_scalar(device.temperature_data, device.solid_temperature, device.occupancy);
-                    field::add_scaled(host.stream, device.density_temp, device.density_data, device.density_source, delta_seconds);
                     (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);
                     boundary::boundary_fill_centered_scalar(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);
                     field::copy(host.stream, device.density_data, device.density_temp);

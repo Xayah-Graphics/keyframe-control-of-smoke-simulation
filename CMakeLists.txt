@@ -74,6 +74,7 @@ target_sources(
         keyframe.field.cu
         keyframe.field.cpp
         keyframe.field.h
+        keyframe.geometry.cpp
         keyframe.boundary.cpp
         keyframe.boundary.cu
         keyframe.boundary.h
@@ -83,6 +84,9 @@ target_sources(
         operators/keyframe.operators.buoyancy.cpp
         operators/keyframe.operators.buoyancy.cu
         operators/keyframe.operators.buoyancy.h
+        operators/keyframe.operators.emitter.cpp
+        operators/keyframe.operators.emitter.cu
+        operators/keyframe.operators.emitter.h
         operators/keyframe.operators.projection.cpp
         operators/keyframe.operators.projection.cu
         operators/keyframe.operators.projection.h
@@ -99,9 +103,11 @@ target_sources(
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         keyframe.field.ixx
+        keyframe.geometry.ixx
         keyframe.boundary.ixx
         operators/keyframe.operators.advection.ixx
         operators/keyframe.operators.buoyancy.ixx
+        operators/keyframe.operators.emitter.ixx
         operators/keyframe.operators.projection.ixx
         operators/keyframe.operators.solid.ixx
         operators/keyframe.operators.vorticity.ixx

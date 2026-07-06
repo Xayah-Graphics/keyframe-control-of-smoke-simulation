@@ -6,6 +6,7 @@ import std;
 export import keyframe.field;
 export import keyframe.boundary;
 export import keyframe.operators.advection;
+export import keyframe.operators.emitter;
 import keyframe.operators.buoyancy;
 import keyframe.operators.projection;
 import keyframe.operators.solid;
@@ -21,15 +22,8 @@ namespace kfs::solver {
         float buoyancy_temperature_factor{1.2f};
         float vorticity_confinement{0.22f};
         operators::Advection::Scheme advection_scheme{operators::Advection::Scheme::monotonic_cubic};
+        operators::Emitter::Source emitter{};
         boundary::DomainBoundary boundary{};
-    };
-
-    export struct PlumeSource final {
-        std::array<float, 3> center{0.5f, 0.12f, 0.5f};
-        std::array<float, 3> radius{0.13f, 0.08f, 0.13f};
-        float density{18.0f};
-        float temperature{36.0f};
-        float falloff{2.2f};
     };
 
     export struct StepRequest final {
@@ -50,7 +44,6 @@ namespace kfs::solver {
         Solver(Solver&& other) noexcept            = delete;
         Solver& operator=(Solver&& other) noexcept = delete;
 
-        void set_plume_source(const PlumeSource& source);
         [[nodiscard]] std::expected<StepStats, std::string> step(const StepRequest& request);
 
         struct HostData final {
@@ -61,19 +54,14 @@ namespace kfs::solver {
             float ambient_temperature{0.0f};
             boundary::PackedDomainBoundary boundary{};
             cudaStream_t stream{nullptr};
-            PlumeSource plume_source{};
-            std::vector<float> density_source{};
-            std::vector<float> temperature_source{};
             std::uint32_t current_step{0u};
         } host;
 
         struct DeviceData final {
             field::ScalarField3D density_data{{0, 0, 0}};
             field::ScalarField3D density_temp{{0, 0, 0}};
-            field::ScalarField3D density_source{{0, 0, 0}};
             field::ScalarField3D temperature_data{{0, 0, 0}};
             field::ScalarField3D temperature_temp{{0, 0, 0}};
-            field::ScalarField3D temperature_source{{0, 0, 0}};
             field::CenteredVectorField3D force{{0, 0, 0}};
             field::CenteredVectorField3D solid_velocity{{0, 0, 0}};
             field::StaggeredVectorField3D velocity{{0, 0, 0}};
@@ -85,6 +73,7 @@ namespace kfs::solver {
 
     private:
         std::optional<operators::Advection> advection{};
+        std::optional<operators::Emitter> emitter{};
         std::optional<operators::Buoyancy> buoyancy{};
         std::optional<operators::Projection> projection{};
         std::optional<operators::Solid> solid{};
