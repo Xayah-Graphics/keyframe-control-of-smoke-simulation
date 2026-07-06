@@ -2,25 +2,27 @@ module;
 #include "keyframe.solver.h"
 
 #include "keyframe.field.h"
-#include <cublas_v2.h>
 #include <cuda_runtime.h>
-#include <cusparse.h>
 
 module keyframe.solver;
 import std;
 import keyframe.field;
 import keyframe.operators.advection;
+import keyframe.operators.projection;
 
 namespace kfs::solver {
     namespace {
         constexpr std::uint32_t flow_boundary_periodic = 3u;
 
-        void write_flow_face(const std::size_t index, const FlowBoundaryFace& face, std::array<std::uint32_t, 6>& types, std::array<float, 18>& velocity, std::array<float, 6>& pressure) {
+        void write_flow_face(const std::size_t index, const FlowBoundaryFace& face, std::array<std::uint32_t, 6>& types, std::array<float, 18>& velocity) {
             types[index]              = static_cast<std::uint32_t>(face.type);
             velocity[index * 3u + 0u] = face.velocity_x;
             velocity[index * 3u + 1u] = face.velocity_y;
             velocity[index * 3u + 2u] = face.velocity_z;
-            pressure[index]           = face.pressure;
+        }
+
+        void write_flow_pressure_face(const std::size_t index, const FlowBoundaryFace& face, std::array<float, 6>& pressure) {
+            pressure[index] = face.pressure;
         }
 
         void write_scalar_face(const std::size_t index, const ScalarBoundaryFace& face, std::array<std::uint32_t, 6>& types, std::array<float, 6>& values) {
@@ -28,13 +30,22 @@ namespace kfs::solver {
             values[index] = face.value;
         }
 
-        void write_flow_boundary(const FlowBoundary& boundary, std::array<std::uint32_t, 6>& types, std::array<float, 18>& velocity, std::array<float, 6>& pressure) {
-            write_flow_face(0u, boundary.x_minus, types, velocity, pressure);
-            write_flow_face(1u, boundary.x_plus, types, velocity, pressure);
-            write_flow_face(2u, boundary.y_minus, types, velocity, pressure);
-            write_flow_face(3u, boundary.y_plus, types, velocity, pressure);
-            write_flow_face(4u, boundary.z_minus, types, velocity, pressure);
-            write_flow_face(5u, boundary.z_plus, types, velocity, pressure);
+        void write_flow_boundary(const FlowBoundary& boundary, std::array<std::uint32_t, 6>& types, std::array<float, 18>& velocity) {
+            write_flow_face(0u, boundary.x_minus, types, velocity);
+            write_flow_face(1u, boundary.x_plus, types, velocity);
+            write_flow_face(2u, boundary.y_minus, types, velocity);
+            write_flow_face(3u, boundary.y_plus, types, velocity);
+            write_flow_face(4u, boundary.z_minus, types, velocity);
+            write_flow_face(5u, boundary.z_plus, types, velocity);
+        }
+
+        void write_flow_boundary_pressure(const FlowBoundary& boundary, std::array<float, 6>& pressure) {
+            write_flow_pressure_face(0u, boundary.x_minus, pressure);
+            write_flow_pressure_face(1u, boundary.x_plus, pressure);
+            write_flow_pressure_face(2u, boundary.y_minus, pressure);
+            write_flow_pressure_face(3u, boundary.y_plus, pressure);
+            write_flow_pressure_face(4u, boundary.z_minus, pressure);
+            write_flow_pressure_face(5u, boundary.z_plus, pressure);
         }
 
         void write_scalar_boundary(const ScalarBoundary& boundary, std::array<std::uint32_t, 6>& types, std::array<float, 6>& values) {
@@ -74,44 +85,16 @@ namespace kfs::solver {
             if (source.falloff <= 0.0f) throw std::runtime_error{"Keyframe smoke plume source falloff must be positive"};
         }
 
-        int wrap_index(const int value, const int size) {
-            const int remainder = value % size;
-            return remainder < 0 ? remainder + size : remainder;
-        }
-
-        std::uint64_t index_3d(const int x, const int y, const int z, const int nx, const int ny) {
-            return static_cast<std::uint64_t>(x) + static_cast<std::uint64_t>(nx) * (static_cast<std::uint64_t>(y) + static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(z));
-        }
-
-        void add_pressure_column(std::array<int, 7>& row_columns, int& row_entry_count, const int column) {
-            for (int entry = 0; entry < row_entry_count; ++entry) {
-                if (row_columns[entry] == column) return;
-            }
-            row_columns[row_entry_count] = column;
-            ++row_entry_count;
-        }
-
-        void add_pressure_neighbor(std::array<int, 7>& row_columns, int& row_entry_count, int next_x, int next_y, int next_z, const bool periodic_axis, const int nx, const int ny, const int nz) {
-            if (next_x < 0 || next_x >= nx || next_y < 0 || next_y >= ny || next_z < 0 || next_z >= nz) {
-                if (!periodic_axis) return;
-                if (next_x < 0 || next_x >= nx) next_x = wrap_index(next_x, nx);
-                if (next_y < 0 || next_y >= ny) next_y = wrap_index(next_y, ny);
-                if (next_z < 0 || next_z >= nz) next_z = wrap_index(next_z, nz);
-            }
-            add_pressure_column(row_columns, row_entry_count, static_cast<int>(index_3d(next_x, next_y, next_z, nx, ny)));
-        }
-
         void initialize_host(Solver::HostData& host, const Config& config) {
             host.nx                          = static_cast<std::int32_t>(config.resolution[0]);
             host.ny                          = static_cast<std::int32_t>(config.resolution[1]);
             host.nz                          = static_cast<std::int32_t>(config.resolution[2]);
             host.cell_size                   = config.cell_size;
-            host.pressure_iterations         = config.pressure_iterations;
             host.ambient_temperature         = config.ambient_temperature;
             host.buoyancy_density_factor     = config.buoyancy_density_factor;
             host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
             host.vorticity_confinement       = config.vorticity_confinement;
-            write_flow_boundary(config.flow_boundary, host.flow_boundary_types, host.flow_boundary_velocity, host.flow_boundary_pressure);
+            write_flow_boundary(config.flow_boundary, host.flow_boundary_types, host.flow_boundary_velocity);
             write_scalar_boundary(config.density_boundary, host.density_boundary_types, host.density_boundary_values);
             write_scalar_boundary(config.temperature_boundary, host.temperature_boundary_types, host.temperature_boundary_values);
             const auto cell_count = static_cast<std::uint64_t>(host.nx) * static_cast<std::uint64_t>(host.ny) * static_cast<std::uint64_t>(host.nz);
@@ -140,101 +123,12 @@ namespace kfs::solver {
         void destroy_device(Solver& smoke) noexcept {
             try {
                 if (smoke.host.stream != nullptr) cudaStreamSynchronize(smoke.host.stream);
-                if (smoke.host.pressure_matrix != nullptr) cusparseDestroySpMat(smoke.host.pressure_matrix);
-                if (smoke.host.pressure_vec_p != nullptr) cusparseDestroyDnVec(smoke.host.pressure_vec_p);
-                if (smoke.host.pressure_vec_ap != nullptr) cusparseDestroyDnVec(smoke.host.pressure_vec_ap);
-                if (smoke.host.cublas != nullptr) cublasDestroy(smoke.host.cublas);
-                if (smoke.host.cusparse != nullptr) cusparseDestroy(smoke.host.cusparse);
-                cuda::free_device_buffers(smoke.device.occupancy, smoke.device.pressure, smoke.device.pressure_rhs, smoke.device.pressure_anchor, smoke.device.pressure_row_offsets, smoke.device.pressure_column_indices, smoke.device.pressure_values, smoke.device.pcg_r, smoke.device.pcg_p, smoke.device.pcg_ap, smoke.device.pressure_dot_rz, smoke.device.pressure_dot_pap, smoke.device.pressure_dot_rr, smoke.device.pressure_alpha, smoke.device.pressure_negative_alpha, smoke.device.pressure_beta, smoke.device.pressure_one, smoke.device.spmv_buffer);
+                cuda::free_device_buffers(smoke.device.occupancy);
                 if (smoke.host.stream != nullptr) cudaStreamDestroy(smoke.host.stream);
             } catch (...) {
             }
-            smoke.host.stream           = nullptr;
-            smoke.host.cublas           = nullptr;
-            smoke.host.cusparse         = nullptr;
-            smoke.host.pressure_matrix  = nullptr;
-            smoke.host.pressure_vec_p   = nullptr;
-            smoke.host.pressure_vec_ap  = nullptr;
-            smoke.host.spmv_buffer_size = 0;
-            smoke.device                = {};
-        }
-
-        void initialize_pressure_system(Solver& smoke) {
-            const auto& host      = smoke.host;
-            const auto cell_count = smoke.device.density_data.count();
-            const auto cell_bytes = smoke.device.density_data.bytes();
-            const int cells       = static_cast<int>(cell_count);
-            const bool periodic_x = host.flow_boundary_types[0] == flow_boundary_periodic && host.flow_boundary_types[1] == flow_boundary_periodic;
-            const bool periodic_y = host.flow_boundary_types[2] == flow_boundary_periodic && host.flow_boundary_types[3] == flow_boundary_periodic;
-            const bool periodic_z = host.flow_boundary_types[4] == flow_boundary_periodic && host.flow_boundary_types[5] == flow_boundary_periodic;
-            std::vector<int> host_row_offsets(static_cast<std::size_t>(cells) + 1u, 0);
-            std::vector<int> host_column_indices{};
-            host_column_indices.reserve(static_cast<std::size_t>(cells) * 7u);
-
-            for (int row = 0; row < cells; ++row) {
-                host_row_offsets[static_cast<std::size_t>(row)] = static_cast<int>(host_column_indices.size());
-                const int x                                     = row % host.nx;
-                const int yz                                    = row / host.nx;
-                const int y                                     = yz % host.ny;
-                const int z                                     = yz / host.ny;
-                std::array<int, 7> row_columns{};
-                int row_entry_count = 0;
-                add_pressure_neighbor(row_columns, row_entry_count, x - 1, y, z, periodic_x, host.nx, host.ny, host.nz);
-                add_pressure_neighbor(row_columns, row_entry_count, x + 1, y, z, periodic_x, host.nx, host.ny, host.nz);
-                add_pressure_neighbor(row_columns, row_entry_count, x, y - 1, z, periodic_y, host.nx, host.ny, host.nz);
-                add_pressure_neighbor(row_columns, row_entry_count, x, y + 1, z, periodic_y, host.nx, host.ny, host.nz);
-                add_pressure_neighbor(row_columns, row_entry_count, x, y, z - 1, periodic_z, host.nx, host.ny, host.nz);
-                add_pressure_neighbor(row_columns, row_entry_count, x, y, z + 1, periodic_z, host.nx, host.ny, host.nz);
-                add_pressure_column(row_columns, row_entry_count, row);
-                for (int left = 0; left < row_entry_count; ++left) {
-                    for (int right = left + 1; right < row_entry_count; ++right) {
-                        if (row_columns[right] < row_columns[left]) {
-                            const int swapped_column = row_columns[left];
-                            row_columns[left]        = row_columns[right];
-                            row_columns[right]       = swapped_column;
-                        }
-                    }
-                }
-                for (int entry = 0; entry < row_entry_count; ++entry) {
-                    host_column_indices.push_back(row_columns[entry]);
-                }
-            }
-
-            host_row_offsets[static_cast<std::size_t>(cells)] = static_cast<int>(host_column_indices.size());
-            const int pressure_nnz                            = static_cast<int>(host_column_indices.size());
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_anchor), sizeof(int)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_anchor: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_row_offsets), static_cast<std::size_t>(cells + 1) * sizeof(int)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_row_offsets: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_column_indices), static_cast<std::size_t>(pressure_nnz) * sizeof(int)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_column_indices: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_values), static_cast<std::size_t>(pressure_nnz) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_values: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMemcpyAsync(smoke.device.pressure_row_offsets, host_row_offsets.data(), static_cast<std::size_t>(cells + 1) * sizeof(int), cudaMemcpyHostToDevice, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync pressure_row_offsets: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMemcpyAsync(smoke.device.pressure_column_indices, host_column_indices.data(), static_cast<std::size_t>(pressure_nnz) * sizeof(int), cudaMemcpyHostToDevice, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync pressure_column_indices: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMemsetAsync(smoke.device.pressure_values, 0, static_cast<std::size_t>(pressure_nnz) * sizeof(float), smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pressure_values: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pcg_r), cell_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pcg_r: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pcg_p), cell_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pcg_p: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pcg_ap), cell_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pcg_ap: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_dot_rz), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_dot_rz: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_dot_pap), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_dot_pap: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_dot_rr), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_dot_rr: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_alpha), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_alpha: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_negative_alpha), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_negative_alpha: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_beta), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_beta: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&smoke.device.pressure_one), sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_one: "} + cudaGetErrorString(status)};
-            constexpr float one = 1.0f;
-            if (const cudaError_t status = cudaMemcpyAsync(smoke.device.pressure_one, &one, sizeof(float), cudaMemcpyHostToDevice, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync pressure_one: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMemsetAsync(smoke.device.pcg_r, 0, cell_bytes, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pcg_r: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMemsetAsync(smoke.device.pcg_p, 0, cell_bytes, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pcg_p: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaMemsetAsync(smoke.device.pcg_ap, 0, cell_bytes, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pcg_ap: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaStreamSynchronize(smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize pressure_system_upload: "} + cudaGetErrorString(status)};
-            if (const cusparseStatus_t status = cusparseCreateCsr(&smoke.host.pressure_matrix, cells, cells, pressure_nnz, smoke.device.pressure_row_offsets, smoke.device.pressure_column_indices, smoke.device.pressure_values, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseCreateCsr matrix"};
-            if (const cusparseStatus_t status = cusparseCreateDnVec(&smoke.host.pressure_vec_p, cells, smoke.device.pcg_p, CUDA_R_32F); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseCreateDnVec vec_p"};
-            if (const cusparseStatus_t status = cusparseCreateDnVec(&smoke.host.pressure_vec_ap, cells, smoke.device.pcg_ap, CUDA_R_32F); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseCreateDnVec vec_ap"};
-            constexpr float spmv_alpha = 1.0f;
-            constexpr float spmv_beta  = 0.0f;
-            if (const cusparseStatus_t status = cusparseSpMV_bufferSize(smoke.host.cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE, &spmv_alpha, smoke.host.pressure_matrix, smoke.host.pressure_vec_p, &spmv_beta, smoke.host.pressure_vec_ap, CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, &smoke.host.spmv_buffer_size); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseSpMV_bufferSize"};
-            if (smoke.host.spmv_buffer_size > 0) {
-                if (const cudaError_t status = cudaMalloc(&smoke.device.spmv_buffer, smoke.host.spmv_buffer_size); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc spmv_buffer: "} + cudaGetErrorString(status)};
-            }
-            if (const cusparseStatus_t status = cusparseSpMV_preprocess(smoke.host.cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE, &spmv_alpha, smoke.host.pressure_matrix, smoke.host.pressure_vec_p, &spmv_beta, smoke.host.pressure_vec_ap, CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, smoke.device.spmv_buffer); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseSpMV_preprocess"};
+            smoke.host.stream = nullptr;
+            smoke.device      = {};
         }
 
         void create_device(Solver& smoke) {
@@ -244,11 +138,6 @@ namespace kfs::solver {
 
             try {
                 if (const cudaError_t status = cudaStreamCreateWithFlags(&host.stream, cudaStreamNonBlocking); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamCreateWithFlags: "} + cudaGetErrorString(status)};
-                if (const cublasStatus_t status = cublasCreate(&host.cublas); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasCreate"};
-                if (const cublasStatus_t status = cublasSetStream(host.cublas, host.stream); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSetStream"};
-                if (const cublasStatus_t status = cublasSetPointerMode(host.cublas, CUBLAS_POINTER_MODE_DEVICE); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSetPointerMode"};
-                if (const cusparseStatus_t status = cusparseCreate(&host.cusparse); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseCreate"};
-                if (const cusparseStatus_t status = cusparseSetStream(host.cusparse, host.stream); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseSetStream"};
 
                 device = Solver::DeviceData{};
                 const std::array resolution{host.nx, host.ny, host.nz};
@@ -267,53 +156,15 @@ namespace kfs::solver {
                 device.vorticity_magnitude.resize(resolution);
                 device.solid_temperature.resize(resolution);
                 const auto cell_count = device.density_data.count();
-                const auto cell_bytes = device.density_data.bytes();
                 if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&device.occupancy), static_cast<std::size_t>(cell_count) * sizeof(std::uint8_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy: "} + cudaGetErrorString(status)};
-                if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&device.pressure), cell_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure: "} + cudaGetErrorString(status)};
-                if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&device.pressure_rhs), cell_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc pressure_rhs: "} + cudaGetErrorString(status)};
 
                 initialize_field_buffers(host, device);
-                if (const cudaError_t status = cudaMemsetAsync(device.pressure, 0, cell_bytes, host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pressure: "} + cudaGetErrorString(status)};
-                if (const cudaError_t status = cudaMemsetAsync(device.pressure_rhs, 0, cell_bytes, host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pressure_rhs: "} + cudaGetErrorString(status)};
-                initialize_pressure_system(smoke);
             } catch (...) {
                 destroy_device(smoke);
                 throw;
             }
         }
 
-        void solve_pressure(Solver& smoke, const float delta_seconds) {
-            const auto& host                = smoke.host;
-            const auto& device              = smoke.device;
-            const auto cell_count           = device.density_data.count();
-            const auto cell_bytes           = device.density_data.bytes();
-            const int cell_count_int        = static_cast<int>(cell_count);
-            const std::uint32_t* flow_types = host.flow_boundary_types.data();
-            const float* flow_pressure      = host.flow_boundary_pressure.data();
-            cuda::fill_int(smoke.host.stream, smoke.device.pressure_anchor, cell_count_int, 1u);
-            cuda::find_pressure_anchor(smoke.host.stream, smoke.device.pressure_anchor, device.occupancy, cell_count);
-            cuda::compute_projection_rhs(smoke.host.stream, smoke.device.pressure_rhs, device.temp_velocity.data[0], device.temp_velocity.data[1], device.temp_velocity.data[2], device.occupancy, smoke.device.pressure_anchor, host.nx, host.ny, host.nz, host.cell_size, delta_seconds, flow_types, flow_pressure);
-            cuda::build_projection_matrix(smoke.host.stream, smoke.device.pressure_values, smoke.device.pressure_row_offsets, smoke.device.pressure_column_indices, device.occupancy, smoke.device.pressure_anchor, host.nx, host.ny, host.nz, flow_types);
-            if (const cudaError_t status = cudaMemsetAsync(smoke.device.pressure, 0, cell_bytes, smoke.host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync pressure: "} + cudaGetErrorString(status)};
-            if (const cublasStatus_t status = cublasScopy(smoke.host.cublas, cell_count_int, smoke.device.pressure_rhs, 1, smoke.device.pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy rhs"};
-            if (const cublasStatus_t status = cublasScopy(smoke.host.cublas, cell_count_int, smoke.device.pcg_r, 1, smoke.device.pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy pcg_p"};
-            if (const cublasStatus_t status = cublasSdot(smoke.host.cublas, cell_count_int, smoke.device.pcg_r, 1, smoke.device.pcg_r, 1, smoke.device.pressure_dot_rz); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSdot pressure_dot_rz"};
-            constexpr float one  = 1.0f;
-            constexpr float zero = 0.0f;
-            for (int iteration = 0; iteration < smoke.host.pressure_iterations; ++iteration) {
-                if (const cusparseStatus_t status = cusparseSpMV(smoke.host.cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, smoke.host.pressure_matrix, smoke.host.pressure_vec_p, &zero, smoke.host.pressure_vec_ap, CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, smoke.device.spmv_buffer); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseSpMV"};
-                if (const cublasStatus_t status = cublasSdot(smoke.host.cublas, cell_count_int, smoke.device.pcg_p, 1, smoke.device.pcg_ap, 1, smoke.device.pressure_dot_pap); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSdot pressure_dot_pap"};
-                cuda::compute_ratio(smoke.host.stream, smoke.device.pressure_alpha, smoke.device.pressure_dot_rz, smoke.device.pressure_dot_pap);
-                if (const cublasStatus_t status = cublasSaxpy(smoke.host.cublas, cell_count_int, smoke.device.pressure_alpha, smoke.device.pcg_p, 1, smoke.device.pressure, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSaxpy pressure"};
-                cuda::negate_scalar(smoke.host.stream, smoke.device.pressure_negative_alpha, smoke.device.pressure_alpha);
-                if (const cublasStatus_t status = cublasSaxpy(smoke.host.cublas, cell_count_int, smoke.device.pressure_negative_alpha, smoke.device.pcg_ap, 1, smoke.device.pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSaxpy pcg_r"};
-                if (const cublasStatus_t status = cublasSdot(smoke.host.cublas, cell_count_int, smoke.device.pcg_r, 1, smoke.device.pcg_r, 1, smoke.device.pressure_dot_rr); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSdot rho_new"};
-                cuda::compute_ratio(smoke.host.stream, smoke.device.pressure_beta, smoke.device.pressure_dot_rr, smoke.device.pressure_dot_rz);
-                if (const cublasStatus_t status = cublasSscal(smoke.host.cublas, cell_count_int, smoke.device.pressure_beta, smoke.device.pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSscal pcg_p"};
-                if (const cublasStatus_t status = cublasSaxpy(smoke.host.cublas, cell_count_int, smoke.device.pressure_one, smoke.device.pcg_r, 1, smoke.device.pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSaxpy pcg_p"};
-                if (const cublasStatus_t status = cublasScopy(smoke.host.cublas, 1, smoke.device.pressure_dot_rr, 1, smoke.device.pressure_dot_rz, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy rho"};
-            }
-        }
     } // namespace
 
     Solver::Solver(const Config& config) {
@@ -322,10 +173,14 @@ namespace kfs::solver {
             this->host   = {};
             this->device = {};
             initialize_host(this->host, config);
+            std::array<float, 6> flow_boundary_pressure{};
+            write_flow_boundary_pressure(config.flow_boundary, flow_boundary_pressure);
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
+            this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.flow_boundary_types.data(), this->host.flow_boundary_velocity.data(), flow_boundary_pressure.data());
             this->set_plume_source(this->host.plume_source);
         } catch (...) {
+            this->projection.reset();
             this->advection.reset();
             destroy_device(*this);
             throw;
@@ -333,6 +188,7 @@ namespace kfs::solver {
     }
 
     Solver::~Solver() noexcept {
+        this->projection.reset();
         this->advection.reset();
         destroy_device(*this);
     }
@@ -420,13 +276,7 @@ namespace kfs::solver {
                         cuda::enforce_staggered_boundary(host.stream, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
                         if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
                     }
-                    solve_pressure(*this, delta_seconds);
-                    for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        cuda::project_staggered_component(host.stream, axis, device.temp_velocity.data[axis], device.pressure, device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, host.cell_size, delta_seconds, flow_types, flow_velocity);
-                        cuda::enforce_staggered_boundary(host.stream, axis, device.temp_velocity.data[axis], device.occupancy, device.solid_velocity.data[axis], host.nx, host.ny, host.nz, flow_types, flow_velocity);
-                        if (periodic[axis]) cuda::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity.data[axis], host.nx, host.ny, host.nz);
-                        field::copy_staggered_component(host.stream, device.velocity, axis, device.temp_velocity);
-                    }
+                    (*this->projection)(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, delta_seconds);
                     field::add_scaled(host.stream, device.temperature_temp, device.temperature_data, device.temperature_source, delta_seconds);
                     (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.temperature_boundary_types.data(), host.temperature_boundary_values.data(), flow_types, flow_velocity);
                     cuda::apply_solid_scalar(host.stream, device.temperature_data.data, device.occupancy, device.solid_temperature.data, host.nx, host.ny, host.nz, host.ambient_temperature);
