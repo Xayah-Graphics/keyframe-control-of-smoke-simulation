@@ -1,5 +1,4 @@
 module;
-#include "keyframe.field.h"
 #include "keyframe.inspector.h"
 
 module keyframe.inspector;

@@ -17,8 +17,6 @@ module;
 
 #include <cuda_runtime_api.h>
 
-#include "keyframe.field.h"
-
 #if defined(_WIN32)
 #define SPECTRA_SCENE_EXPORT __declspec(dllexport)
 #else

@@ -1,10 +1,11 @@
 module;
-#include "keyframe.field.h"
 #include <cublas_v2.h>
+#include <cuda_runtime.h>
 #include <cusparse.h>
 
 export module keyframe.solver;
 import std;
+export import keyframe.field;
 
 namespace kfs::solver {
     export enum class FlowBoundaryType : std::uint32_t {
@@ -131,20 +132,20 @@ namespace kfs::solver {
         } host;
 
         struct DeviceData final {
-            cuda::field::ScalarField3D density_data{{0, 0, 0}};
-            cuda::field::ScalarField3D density_temp{{0, 0, 0}};
-            cuda::field::ScalarField3D density_source{{0, 0, 0}};
-            cuda::field::ScalarField3D temperature_data{{0, 0, 0}};
-            cuda::field::ScalarField3D temperature_temp{{0, 0, 0}};
-            cuda::field::ScalarField3D temperature_source{{0, 0, 0}};
-            cuda::field::CenteredVectorField3D force{{0, 0, 0}};
-            cuda::field::CenteredVectorField3D solid_velocity{{0, 0, 0}};
-            cuda::field::StaggeredVectorField3D velocity{{0, 0, 0}};
-            cuda::field::StaggeredVectorField3D temp_velocity{{0, 0, 0}};
-            cuda::field::CenteredVectorField3D centered_velocity{{0, 0, 0}};
-            cuda::field::CenteredVectorField3D vorticity{{0, 0, 0}};
-            cuda::field::ScalarField3D vorticity_magnitude{{0, 0, 0}};
-            cuda::field::ScalarField3D solid_temperature{{0, 0, 0}};
+            field::ScalarField3D density_data{{0, 0, 0}};
+            field::ScalarField3D density_temp{{0, 0, 0}};
+            field::ScalarField3D density_source{{0, 0, 0}};
+            field::ScalarField3D temperature_data{{0, 0, 0}};
+            field::ScalarField3D temperature_temp{{0, 0, 0}};
+            field::ScalarField3D temperature_source{{0, 0, 0}};
+            field::CenteredVectorField3D force{{0, 0, 0}};
+            field::CenteredVectorField3D solid_velocity{{0, 0, 0}};
+            field::StaggeredVectorField3D velocity{{0, 0, 0}};
+            field::StaggeredVectorField3D temp_velocity{{0, 0, 0}};
+            field::CenteredVectorField3D centered_velocity{{0, 0, 0}};
+            field::CenteredVectorField3D vorticity{{0, 0, 0}};
+            field::ScalarField3D vorticity_magnitude{{0, 0, 0}};
+            field::ScalarField3D solid_temperature{{0, 0, 0}};
             std::uint8_t* occupancy{nullptr};
             float* pressure{nullptr};
             float* pressure_rhs{nullptr};

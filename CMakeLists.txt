@@ -72,6 +72,7 @@ target_sources(
         libkeyframe
         PRIVATE
         keyframe.field.cu
+        keyframe.field.cpp
         keyframe.field.h
         keyframe.solver.cu
         keyframe.solver.cpp
@@ -81,6 +82,7 @@ target_sources(
         keyframe.inspector.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        keyframe.field.ixx
         keyframe.solver.ixx
         keyframe.inspector.ixx
 )
