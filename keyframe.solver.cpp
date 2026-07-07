@@ -23,7 +23,9 @@ namespace kfs::solver {
             host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
             host.density_emission_rate       = config.density_emission_rate;
             host.temperature_emission_rate   = config.temperature_emission_rate;
-            host.boundary                    = boundary::pack(config.boundary);
+            host.boundary.flow               = boundary::pack(config.boundary.flow);
+            host.boundary.density            = boundary::pack(config.boundary.density);
+            host.boundary.temperature        = boundary::pack(config.boundary.temperature);
         }
 
         void initialize_field_buffers(const Solver::HostData& host, Solver::DeviceData& device) {

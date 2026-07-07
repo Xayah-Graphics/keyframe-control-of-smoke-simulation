@@ -11,6 +11,12 @@ import keyframe.operators.projection;
 import keyframe.operators.vorticity;
 
 namespace kfs::solver {
+    export struct SmokeBoundary final {
+        boundary::FlowBoundary flow{};
+        boundary::ScalarBoundary density{};
+        boundary::ScalarBoundary temperature{};
+    };
+
     export struct Config final {
         std::array<std::uint32_t, 3> resolution{64, 96, 64};
         float cell_size{0.01875f};
@@ -23,7 +29,7 @@ namespace kfs::solver {
         operators::Emitter::Source emitter{};
         float density_emission_rate{18.0f};
         float temperature_emission_rate{36.0f};
-        boundary::DomainBoundary boundary{};
+        SmokeBoundary boundary{};
     };
 
     export struct StepRequest final {
@@ -56,7 +62,11 @@ namespace kfs::solver {
             float buoyancy_temperature_factor{0.0f};
             float density_emission_rate{0.0f};
             float temperature_emission_rate{0.0f};
-            boundary::PackedDomainBoundary boundary{};
+            struct PackedSmokeBoundary final {
+                boundary::PackedFlowBoundary flow{};
+                boundary::PackedScalarBoundary density{};
+                boundary::PackedScalarBoundary temperature{};
+            } boundary{};
             cudaStream_t stream{nullptr};
             std::uint32_t current_step{0u};
         } host;

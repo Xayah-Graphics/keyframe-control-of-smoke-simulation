@@ -1,4 +1,4 @@
-#include "../keyframe.boundary.h"
+#include "../keyframe.boundary.cuh"
 #include "../keyframe.field.cuh"
 #include "keyframe.operators.advection.h"
 #include <stdexcept>

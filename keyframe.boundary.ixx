@@ -50,12 +50,6 @@ export namespace kfs::boundary {
         ScalarBoundaryFace z_plus{ScalarBoundaryType::periodic, 0.0f};
     };
 
-    struct DomainBoundary final {
-        FlowBoundary flow{};
-        ScalarBoundary density{};
-        ScalarBoundary temperature{};
-    };
-
     struct PackedFlowBoundary final {
         std::array<std::uint32_t, 6> types{};
         std::array<float, 18> velocity{};
@@ -69,13 +63,8 @@ export namespace kfs::boundary {
         std::array<bool, 3> periodic{};
     };
 
-    struct PackedDomainBoundary final {
-        PackedFlowBoundary flow{};
-        PackedScalarBoundary density{};
-        PackedScalarBoundary temperature{};
-    };
-
-    [[nodiscard]] PackedDomainBoundary pack(const DomainBoundary& boundary);
+    [[nodiscard]] PackedFlowBoundary pack(const FlowBoundary& boundary);
+    [[nodiscard]] PackedScalarBoundary pack(const ScalarBoundary& boundary);
 
     void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values, const field::IndexedField3D& cell_indices, const field::CenteredVectorField3D& constraint_velocity, const PackedFlowBoundary& boundary);
     void sync_periodic_staggered_component(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values);

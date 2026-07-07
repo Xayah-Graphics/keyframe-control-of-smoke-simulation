@@ -77,6 +77,7 @@ target_sources(
         keyframe.field.h
         keyframe.boundary.cpp
         keyframe.boundary.cu
+        keyframe.boundary.cuh
         keyframe.boundary.h
         operators/keyframe.operators.advection.cpp
         operators/keyframe.operators.advection.cu

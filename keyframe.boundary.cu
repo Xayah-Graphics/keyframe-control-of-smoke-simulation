@@ -1,9 +1,10 @@
 #include "keyframe.boundary.h"
+#include "keyframe.boundary.cuh"
 #include <stdexcept>
 #include <string>
 
 namespace kfs::cuda::boundary {
-    __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint32_t* cell_indices, const float* solid_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint32_t* cell_indices, const float* constraint_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -43,17 +44,17 @@ namespace kfs::cuda::boundary {
         float value  = 0.0f;
         float weight = 0.0f;
         if (left_occupied) {
-            value += constraint_velocity_value(solid_velocity_x, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(constraint_velocity_x, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (right_occupied) {
-            value += constraint_velocity_value(solid_velocity_x, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(constraint_velocity_x, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void enforce_velocity_y_boundaries_kernel(float* velocity_y, const std::uint32_t* cell_indices, const float* solid_velocity_y, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_velocity_y_boundaries_kernel(float* velocity_y, const std::uint32_t* cell_indices, const float* constraint_velocity_y, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -93,17 +94,17 @@ namespace kfs::cuda::boundary {
         float value  = 0.0f;
         float weight = 0.0f;
         if (down_occupied) {
-            value += constraint_velocity_value(solid_velocity_y, cell_indices, down_x, down_y, down_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(constraint_velocity_y, cell_indices, down_x, down_y, down_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (up_occupied) {
-            value += constraint_velocity_value(solid_velocity_y, cell_indices, up_x, up_y, up_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(constraint_velocity_y, cell_indices, up_x, up_y, up_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void enforce_velocity_z_boundaries_kernel(float* velocity_z, const std::uint32_t* cell_indices, const float* solid_velocity_z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_velocity_z_boundaries_kernel(float* velocity_z, const std::uint32_t* cell_indices, const float* constraint_velocity_z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -143,11 +144,11 @@ namespace kfs::cuda::boundary {
         float value  = 0.0f;
         float weight = 0.0f;
         if (back_occupied) {
-            value += constraint_velocity_value(solid_velocity_z, cell_indices, back_x, back_y, back_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(constraint_velocity_z, cell_indices, back_x, back_y, back_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (front_occupied) {
-            value += constraint_velocity_value(solid_velocity_z, cell_indices, front_x, front_y, front_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(constraint_velocity_z, cell_indices, front_x, front_y, front_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
@@ -223,13 +224,13 @@ namespace kfs::cuda::boundary {
         destination[index] = 0.0f;
     }
 
-    void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* solid_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
+    void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
         constexpr dim3 block{8u, 8u, 4u};
         const dim3 grid             = field::staggered_grid(axis, nx, ny, nz, block);
         const FlowBoundary boundary = make_flow_velocity_boundary(flow_types, flow_velocity);
-        if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, solid_velocity_component, nx, ny, nz, boundary);
-        if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, solid_velocity_component, nx, ny, nz, boundary);
-        if (axis == 2u) enforce_velocity_z_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, solid_velocity_component, nx, ny, nz, boundary);
+        if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, constraint_velocity_component, nx, ny, nz, boundary);
+        if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, constraint_velocity_component, nx, ny, nz, boundary);
+        if (axis == 2u) enforce_velocity_z_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, constraint_velocity_component, nx, ny, nz, boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"enforce_staggered_boundary_kernel: "} + cudaGetErrorString(status)};
     }
 
