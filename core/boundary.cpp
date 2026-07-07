@@ -1,11 +1,11 @@
 module;
-#include "keyframe.boundary.h"
+#include "boundary.h"
 
-module keyframe.boundary;
+module xayah.core.boundary;
 import std;
-import keyframe.field;
+import xayah.core.field;
 
-namespace kfs::boundary {
+namespace xayah::core::boundary {
     ScalarBoundaryFace fixed_value(const float value) noexcept {
         return ScalarBoundaryFace{ScalarBoundaryMode::fixed_value, value};
     }
@@ -113,14 +113,14 @@ namespace kfs::boundary {
     }
 
     void enforce(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values, const field::IndexedField3D& cell_indices, const field::CenteredVectorField3D& constraint_values, const PackedVectorBoundary3D& boundary) {
-        cuda::boundary::enforce(stream, axis, values.data[axis], cell_indices.data, constraint_values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2], boundary.modes.data(), boundary.values.data());
+        cuda::enforce(stream, axis, values.data[axis], cell_indices.data, constraint_values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2], boundary.modes.data(), boundary.values.data());
     }
 
     void synchronize(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values) {
-        cuda::boundary::synchronize(stream, axis, values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2]);
+        cuda::synchronize(stream, axis, values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2]);
     }
 
     void extrapolate(const cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const field::IndexedField3D& cell_indices, const PackedScalarBoundary3D& boundary) {
-        cuda::boundary::extrapolate(stream, destination.data, source.data, cell_indices.data, destination.resolution[0], destination.resolution[1], destination.resolution[2], boundary.modes.data(), boundary.values.data());
+        cuda::extrapolate(stream, destination.data, source.data, cell_indices.data, destination.resolution[0], destination.resolution[1], destination.resolution[2], boundary.modes.data(), boundary.values.data());
     }
-} // namespace kfs::boundary
+} // namespace xayah::core::boundary

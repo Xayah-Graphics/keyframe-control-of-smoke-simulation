@@ -1,6 +1,5 @@
-#include "../keyframe.field.cuh"
-#include "keyframe.operators.emitter.h"
-#include <cmath>
+#include "../core/field.cuh"
+#include "emitter.h"
 #include <stdexcept>
 #include <string>
 
@@ -31,11 +30,11 @@ namespace {
     }
 } // namespace
 
-namespace kfs::cuda::operators::emitter {
+namespace xayah::operators::emitter::cuda {
     void emit_scalar(const cudaStream_t stream, float* const destination, const float* const current, const int nx, const int ny, const int nz, const float cell_size, const float delta_seconds, const std::array<float, 3> center, const std::array<float, 3> radius, const float rate, const float falloff) {
         constexpr std::uint32_t block  = 256u;
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        emit_scalar_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(destination, current, nx, ny, nz, cell_size, delta_seconds, center[0], center[1], center[2], radius[0], radius[1], radius[2], rate, falloff);
+        emit_scalar_kernel<<<core::field::cuda::ceil_div_u32(cell_count, block), block, 0, stream>>>(destination, current, nx, ny, nz, cell_size, delta_seconds, center[0], center[1], center[2], radius[0], radius[1], radius[2], rate, falloff);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"emit_scalar_kernel: "} + cudaGetErrorString(status)};
     }
-} // namespace kfs::cuda::operators::emitter
+} // namespace xayah::operators::emitter::cuda

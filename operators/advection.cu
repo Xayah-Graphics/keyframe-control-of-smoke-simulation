@@ -1,10 +1,10 @@
-#include "../keyframe.boundary.cuh"
-#include "../keyframe.field.cuh"
-#include "keyframe.operators.advection.h"
+#include "../core/boundary.cuh"
+#include "../core/field.cuh"
+#include "advection.h"
 #include <stdexcept>
 #include <string>
 
-namespace kfs::cuda::operators::advection {
+namespace xayah::operators::advection::cuda {
     constexpr std::uint32_t scheme_monotonic_cubic = 1u;
 
     __device__ float linear_interpolate(const float c000, const float c100, const float c010, const float c110, const float c001, const float c101, const float c011, const float c111, const float tx, const float ty, const float tz) {
@@ -33,8 +33,8 @@ namespace kfs::cuda::operators::advection {
         return (2.0f * t3 - 3.0f * t2 + 1.0f) * p1 + (t3 - 2.0f * t2 + t) * m1 + (-2.0f * t3 + 3.0f * t2) * p2 + (t3 - t2) * m2;
     }
 
-    __device__ float sample_scalar_linear(const float* field, float3 position, const int nx, const int ny, const int nz, const float h, const boundary::ScalarBoundary3D boundary_config) {
-        position       = boundary::wrap_scalar_position(position, nx, ny, nz, h, boundary_config);
+    __device__ float sample_scalar_linear(const float* field, float3 position, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::ScalarBoundary3D boundary_config) {
+        position       = core::boundary::cuda::wrap_scalar_position(position, nx, ny, nz, h, boundary_config);
         const float gx = position.x / h - 0.5f;
         const float gy = position.y / h - 0.5f;
         const float gz = position.z / h - 0.5f;
@@ -44,11 +44,11 @@ namespace kfs::cuda::operators::advection {
         const float tx = gx - static_cast<float>(x0);
         const float ty = gy - static_cast<float>(y0);
         const float tz = gz - static_cast<float>(z0);
-        return linear_interpolate(boundary::load_scalar(field, x0, y0, z0, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0 + 1, y0, z0, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0, y0 + 1, z0, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0 + 1, y0 + 1, z0, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0, y0, z0 + 1, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0 + 1, y0, z0 + 1, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0, y0 + 1, z0 + 1, nx, ny, nz, boundary_config), boundary::load_scalar(field, x0 + 1, y0 + 1, z0 + 1, nx, ny, nz, boundary_config), tx, ty, tz);
+        return linear_interpolate(core::boundary::cuda::load_scalar(field, x0, y0, z0, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0 + 1, y0, z0, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0, y0 + 1, z0, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0 + 1, y0 + 1, z0, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0, y0, z0 + 1, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0 + 1, y0, z0 + 1, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0, y0 + 1, z0 + 1, nx, ny, nz, boundary_config), core::boundary::cuda::load_scalar(field, x0 + 1, y0 + 1, z0 + 1, nx, ny, nz, boundary_config), tx, ty, tz);
     }
 
-    __device__ float sample_scalar_cubic(const float* field, float3 position, const int nx, const int ny, const int nz, const float h, const boundary::ScalarBoundary3D boundary_config) {
-        position       = boundary::wrap_scalar_position(position, nx, ny, nz, h, boundary_config);
+    __device__ float sample_scalar_cubic(const float* field, float3 position, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::ScalarBoundary3D boundary_config) {
+        position       = core::boundary::cuda::wrap_scalar_position(position, nx, ny, nz, h, boundary_config);
         const float gx = position.x / h - 0.5f;
         const float gy = position.y / h - 0.5f;
         const float gz = position.z / h - 0.5f;
@@ -64,10 +64,10 @@ namespace kfs::cuda::operators::advection {
             for (int dy = 0; dy < 4; ++dy) {
                 const int yy   = y1 + dy - 1;
                 const int zz   = z1 + dz - 1;
-                const float p0 = boundary::load_scalar(field, x1 - 1, yy, zz, nx, ny, nz, boundary_config);
-                const float p1 = boundary::load_scalar(field, x1, yy, zz, nx, ny, nz, boundary_config);
-                const float p2 = boundary::load_scalar(field, x1 + 1, yy, zz, nx, ny, nz, boundary_config);
-                const float p3 = boundary::load_scalar(field, x1 + 2, yy, zz, nx, ny, nz, boundary_config);
+                const float p0 = core::boundary::cuda::load_scalar(field, x1 - 1, yy, zz, nx, ny, nz, boundary_config);
+                const float p1 = core::boundary::cuda::load_scalar(field, x1, yy, zz, nx, ny, nz, boundary_config);
+                const float p2 = core::boundary::cuda::load_scalar(field, x1 + 1, yy, zz, nx, ny, nz, boundary_config);
+                const float p3 = core::boundary::cuda::load_scalar(field, x1 + 2, yy, zz, nx, ny, nz, boundary_config);
                 y_samples[dy]  = monotonic_cubic_1d(p0, p1, p2, p3, tx);
             }
             z_samples[dz] = monotonic_cubic_1d(y_samples[0], y_samples[1], y_samples[2], y_samples[3], ty);
@@ -75,8 +75,8 @@ namespace kfs::cuda::operators::advection {
         return monotonic_cubic_1d(z_samples[0], z_samples[1], z_samples[2], z_samples[3], tz);
     }
 
-    __device__ float sample_staggered_component_linear(const float* field, const std::uint32_t axis, float3 position, const int nx, const int ny, const int nz, const float h, const boundary::VectorBoundary3D boundary_config) {
-        position       = boundary::wrap_vector_position(position, nx, ny, nz, h, boundary_config);
+    __device__ float sample_staggered_component_linear(const float* field, const std::uint32_t axis, float3 position, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::VectorBoundary3D boundary_config) {
+        position       = core::boundary::cuda::wrap_vector_position(position, nx, ny, nz, h, boundary_config);
         const float gx = position.x / h - (axis == 0u ? 0.0f : 0.5f);
         const float gy = position.y / h - (axis == 1u ? 0.0f : 0.5f);
         const float gz = position.z / h - (axis == 2u ? 0.0f : 0.5f);
@@ -86,11 +86,11 @@ namespace kfs::cuda::operators::advection {
         const float tx = gx - static_cast<float>(i0);
         const float ty = gy - static_cast<float>(j0);
         const float tz = gz - static_cast<float>(k0);
-        return linear_interpolate(boundary::load_staggered_component(field, axis, i0, j0, k0, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0 + 1, j0, k0, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0, j0 + 1, k0, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0 + 1, j0 + 1, k0, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0, j0, k0 + 1, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0 + 1, j0, k0 + 1, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0, j0 + 1, k0 + 1, nx, ny, nz, boundary_config), boundary::load_staggered_component(field, axis, i0 + 1, j0 + 1, k0 + 1, nx, ny, nz, boundary_config), tx, ty, tz);
+        return linear_interpolate(core::boundary::cuda::load_staggered_component(field, axis, i0, j0, k0, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0 + 1, j0, k0, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0, j0 + 1, k0, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0 + 1, j0 + 1, k0, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0, j0, k0 + 1, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0 + 1, j0, k0 + 1, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0, j0 + 1, k0 + 1, nx, ny, nz, boundary_config), core::boundary::cuda::load_staggered_component(field, axis, i0 + 1, j0 + 1, k0 + 1, nx, ny, nz, boundary_config), tx, ty, tz);
     }
 
-    __device__ float sample_staggered_component_cubic(const float* field, const std::uint32_t axis, float3 position, const int nx, const int ny, const int nz, const float h, const boundary::VectorBoundary3D boundary_config) {
-        position       = boundary::wrap_vector_position(position, nx, ny, nz, h, boundary_config);
+    __device__ float sample_staggered_component_cubic(const float* field, const std::uint32_t axis, float3 position, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::VectorBoundary3D boundary_config) {
+        position       = core::boundary::cuda::wrap_vector_position(position, nx, ny, nz, h, boundary_config);
         const float gx = position.x / h - (axis == 0u ? 0.0f : 0.5f);
         const float gy = position.y / h - (axis == 1u ? 0.0f : 0.5f);
         const float gz = position.z / h - (axis == 2u ? 0.0f : 0.5f);
@@ -106,10 +106,10 @@ namespace kfs::cuda::operators::advection {
             for (int dy = 0; dy < 4; ++dy) {
                 const int jj   = j1 + dy - 1;
                 const int kk   = k1 + dz - 1;
-                const float p0 = boundary::load_staggered_component(field, axis, i1 - 1, jj, kk, nx, ny, nz, boundary_config);
-                const float p1 = boundary::load_staggered_component(field, axis, i1, jj, kk, nx, ny, nz, boundary_config);
-                const float p2 = boundary::load_staggered_component(field, axis, i1 + 1, jj, kk, nx, ny, nz, boundary_config);
-                const float p3 = boundary::load_staggered_component(field, axis, i1 + 2, jj, kk, nx, ny, nz, boundary_config);
+                const float p0 = core::boundary::cuda::load_staggered_component(field, axis, i1 - 1, jj, kk, nx, ny, nz, boundary_config);
+                const float p1 = core::boundary::cuda::load_staggered_component(field, axis, i1, jj, kk, nx, ny, nz, boundary_config);
+                const float p2 = core::boundary::cuda::load_staggered_component(field, axis, i1 + 1, jj, kk, nx, ny, nz, boundary_config);
+                const float p3 = core::boundary::cuda::load_staggered_component(field, axis, i1 + 2, jj, kk, nx, ny, nz, boundary_config);
                 y_samples[dy]  = monotonic_cubic_1d(p0, p1, p2, p3, tx);
             }
             z_samples[dz] = monotonic_cubic_1d(y_samples[0], y_samples[1], y_samples[2], y_samples[3], ty);
@@ -117,12 +117,12 @@ namespace kfs::cuda::operators::advection {
         return monotonic_cubic_1d(z_samples[0], z_samples[1], z_samples[2], z_samples[3], tz);
     }
 
-    __device__ float3 sample_staggered_vector(const float* x_component, const float* y_component, const float* z_component, const float3 position, const int nx, const int ny, const int nz, const float h, const boundary::VectorBoundary3D boundary_config) {
+    __device__ float3 sample_staggered_vector(const float* x_component, const float* y_component, const float* z_component, const float3 position, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::VectorBoundary3D boundary_config) {
         return make_float3(sample_staggered_component_linear(x_component, 0u, position, nx, ny, nz, h, boundary_config), sample_staggered_component_linear(y_component, 1u, position, nx, ny, nz, h, boundary_config), sample_staggered_component_linear(z_component, 2u, position, nx, ny, nz, h, boundary_config));
     }
 
-    __device__ bool position_hits_marked_cell(const float3 position, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const boundary::VectorBoundary3D boundary_config) {
-        const float3 wrapped = boundary::wrap_vector_position(position, nx, ny, nz, h, boundary_config);
+    __device__ bool position_hits_marked_cell(const float3 position, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::VectorBoundary3D boundary_config) {
+        const float3 wrapped = core::boundary::cuda::wrap_vector_position(position, nx, ny, nz, h, boundary_config);
         if (wrapped.x < 0.0f || wrapped.x > static_cast<float>(nx) * h || wrapped.y < 0.0f || wrapped.y > static_cast<float>(ny) * h || wrapped.z < 0.0f || wrapped.z > static_cast<float>(nz) * h) return true;
         int cell_x = static_cast<int>(floorf(wrapped.x / h));
         int cell_y = static_cast<int>(floorf(wrapped.y / h));
@@ -130,10 +130,10 @@ namespace kfs::cuda::operators::advection {
         if (cell_x == nx) cell_x = nx - 1;
         if (cell_y == ny) cell_y = ny - 1;
         if (cell_z == nz) cell_z = nz - 1;
-        return !boundary::cell_in_bounds(cell_x, cell_y, cell_z, nx, ny, nz) || cell_indices[field::index(cell_x, cell_y, cell_z, nx, ny)] != 0u;
+        return !core::boundary::cuda::cell_in_bounds(cell_x, cell_y, cell_z, nx, ny, nz) || cell_indices[core::field::cuda::index(cell_x, cell_y, cell_z, nx, ny)] != 0u;
     }
 
-    __device__ float3 trace_rk2(const float3 start, const float* x_component, const float* y_component, const float* z_component, const std::uint32_t* cell_indices, const float dt, const int nx, const int ny, const int nz, const float h, const boundary::VectorBoundary3D boundary_config) {
+    __device__ float3 trace_rk2(const float3 start, const float* x_component, const float* y_component, const float* z_component, const std::uint32_t* cell_indices, const float dt, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::VectorBoundary3D boundary_config) {
         const float3 value0 = sample_staggered_vector(x_component, y_component, z_component, start, nx, ny, nz, h, boundary_config);
         const float3 mid    = make_float3(start.x - 0.5f * dt * value0.x, start.y - 0.5f * dt * value0.y, start.z - 0.5f * dt * value0.z);
         const float3 value1 = sample_staggered_vector(x_component, y_component, z_component, mid, nx, ny, nz, h, boundary_config);
@@ -157,44 +157,44 @@ namespace kfs::cuda::operators::advection {
         return make_float3((static_cast<float>(i) + (axis == 0u ? 0.0f : 0.5f)) * h, (static_cast<float>(j) + (axis == 1u ? 0.0f : 0.5f)) * h, (static_cast<float>(k) + (axis == 2u ? 0.0f : 0.5f)) * h);
     }
 
-    __global__ void advect_staggered_component_kernel(const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const boundary::VectorBoundary3D boundary_config) {
+    __global__ void advect_staggered_component_kernel(const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const core::boundary::cuda::VectorBoundary3D boundary_config) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
-        if (i >= field::extent(axis, 0u, nx, ny, nz) || j >= field::extent(axis, 1u, nx, ny, nz) || k >= field::extent(axis, 2u, nx, ny, nz)) return;
+        if (i >= core::field::cuda::extent(axis, 0u, nx, ny, nz) || j >= core::field::cuda::extent(axis, 1u, nx, ny, nz) || k >= core::field::cuda::extent(axis, 2u, nx, ny, nz)) return;
         const float3 start                               = staggered_sample_position(axis, i, j, k, h);
         const float3 position                            = trace_rk2(start, vector_x, vector_y, vector_z, cell_indices, dt, nx, ny, nz, h, boundary_config);
-        destination[field::index(axis, i, j, k, nx, ny)] = scheme == scheme_monotonic_cubic ? sample_staggered_component_cubic(source, axis, position, nx, ny, nz, h, boundary_config) : sample_staggered_component_linear(source, axis, position, nx, ny, nz, h, boundary_config);
+        destination[core::field::cuda::index(axis, i, j, k, nx, ny)] = scheme == scheme_monotonic_cubic ? sample_staggered_component_cubic(source, axis, position, nx, ny, nz, h, boundary_config) : sample_staggered_component_linear(source, axis, position, nx, ny, nz, h, boundary_config);
     }
 
-    __global__ void advect_centered_scalar_kernel(float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const boundary::ScalarBoundary3D scalar_boundary, const boundary::VectorBoundary3D vector_boundary) {
+    __global__ void advect_centered_scalar_kernel(float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const core::boundary::cuda::ScalarBoundary3D scalar_boundary, const core::boundary::cuda::VectorBoundary3D vector_boundary) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (x >= nx || y >= ny || z >= nz) return;
-        if (boundary::cell_is_marked(cell_indices, x, y, z, nx, ny, nz, vector_boundary)) {
-            destination[field::index(x, y, z, nx, ny)] = 0.0f;
+        if (core::boundary::cuda::cell_is_marked(cell_indices, x, y, z, nx, ny, nz, vector_boundary)) {
+            destination[core::field::cuda::index(x, y, z, nx, ny)] = 0.0f;
             return;
         }
         const float3 start                         = make_float3((static_cast<float>(x) + 0.5f) * h, (static_cast<float>(y) + 0.5f) * h, (static_cast<float>(z) + 0.5f) * h);
         const float3 position                      = trace_rk2(start, vector_x, vector_y, vector_z, cell_indices, dt, nx, ny, nz, h, vector_boundary);
-        destination[field::index(x, y, z, nx, ny)] = scheme == scheme_monotonic_cubic ? sample_scalar_cubic(source, position, nx, ny, nz, h, scalar_boundary) : sample_scalar_linear(source, position, nx, ny, nz, h, scalar_boundary);
+        destination[core::field::cuda::index(x, y, z, nx, ny)] = scheme == scheme_monotonic_cubic ? sample_scalar_cubic(source, position, nx, ny, nz, h, scalar_boundary) : sample_scalar_linear(source, position, nx, ny, nz, h, scalar_boundary);
     }
 
     void advect_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                                  = field::staggered_grid(axis, nx, ny, nz, block);
-        const boundary::VectorBoundary3D boundary_config = boundary::make_vector_boundary(boundary_modes, boundary_values);
+        const dim3 grid                                  = core::field::cuda::staggered_grid(axis, nx, ny, nz, block);
+        const core::boundary::cuda::VectorBoundary3D boundary_config = core::boundary::cuda::make_vector_boundary(boundary_modes, boundary_values);
         advect_staggered_component_kernel<<<grid, block, 0, stream>>>(axis, destination, source, vector_x, vector_y, vector_z, cell_indices, nx, ny, nz, h, dt, advection_mode, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_staggered_component_kernel: "} + cudaGetErrorString(status)};
     }
 
     void advect_centered_scalar(cudaStream_t stream, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* scalar_boundary_modes, const float* scalar_boundary_values, const std::uint32_t* vector_boundary_modes, const float* vector_boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                                  = field::centered_grid(nx, ny, nz, block);
-        const boundary::ScalarBoundary3D scalar_boundary = boundary::make_scalar_boundary(scalar_boundary_modes, scalar_boundary_values);
-        const boundary::VectorBoundary3D vector_boundary = boundary::make_vector_boundary(vector_boundary_modes, vector_boundary_values);
+        const dim3 grid                                  = core::field::cuda::centered_grid(nx, ny, nz, block);
+        const core::boundary::cuda::ScalarBoundary3D scalar_boundary = core::boundary::cuda::make_scalar_boundary(scalar_boundary_modes, scalar_boundary_values);
+        const core::boundary::cuda::VectorBoundary3D vector_boundary = core::boundary::cuda::make_vector_boundary(vector_boundary_modes, vector_boundary_values);
         advect_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, vector_x, vector_y, vector_z, cell_indices, nx, ny, nz, h, dt, advection_mode, scalar_boundary, vector_boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_centered_scalar_kernel: "} + cudaGetErrorString(status)};
     }
-} // namespace kfs::cuda::operators::advection
+} // namespace xayah::operators::advection::cuda

@@ -1,6 +1,5 @@
-#include "keyframe.collider.h"
-#include "keyframe.field.cuh"
-#include <cmath>
+#include "collider.h"
+#include "field.cuh"
 #include <stdexcept>
 #include <string>
 
@@ -51,18 +50,18 @@ namespace {
     }
 } // namespace
 
-namespace kfs::cuda::collider {
+namespace xayah::core::collider::cuda {
     void rasterize_ellipsoid(cudaStream_t stream, std::uint32_t* cell_indices, float* velocity_x, float* velocity_y, float* velocity_z, float* scalar, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t tag, const std::array<float, 3> center, const std::array<float, 3> radius, const std::array<float, 3> velocity, const float scalar_value) {
         constexpr std::uint32_t block  = 256u;
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        rasterize_ellipsoid_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(cell_indices, velocity_x, velocity_y, velocity_z, scalar, nx, ny, nz, cell_size, tag, center[0], center[1], center[2], radius[0], radius[1], radius[2], velocity[0], velocity[1], velocity[2], scalar_value);
+        rasterize_ellipsoid_kernel<<<field::cuda::ceil_div_u32(cell_count, block), block, 0, stream>>>(cell_indices, velocity_x, velocity_y, velocity_z, scalar, nx, ny, nz, cell_size, tag, center[0], center[1], center[2], radius[0], radius[1], radius[2], velocity[0], velocity[1], velocity[2], scalar_value);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"rasterize_ellipsoid_kernel: "} + cudaGetErrorString(status)};
     }
 
     void rasterize_box(cudaStream_t stream, std::uint32_t* cell_indices, float* velocity_x, float* velocity_y, float* velocity_z, float* scalar, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t tag, const std::array<float, 3> center, const std::array<float, 3> half_extent, const std::array<float, 3> velocity, const float scalar_value) {
         constexpr std::uint32_t block  = 256u;
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        rasterize_box_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(cell_indices, velocity_x, velocity_y, velocity_z, scalar, nx, ny, nz, cell_size, tag, center[0], center[1], center[2], half_extent[0], half_extent[1], half_extent[2], velocity[0], velocity[1], velocity[2], scalar_value);
+        rasterize_box_kernel<<<field::cuda::ceil_div_u32(cell_count, block), block, 0, stream>>>(cell_indices, velocity_x, velocity_y, velocity_z, scalar, nx, ny, nz, cell_size, tag, center[0], center[1], center[2], half_extent[0], half_extent[1], half_extent[2], velocity[0], velocity[1], velocity[2], scalar_value);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"rasterize_box_kernel: "} + cudaGetErrorString(status)};
     }
-} // namespace kfs::cuda::collider
+} // namespace xayah::core::collider::cuda

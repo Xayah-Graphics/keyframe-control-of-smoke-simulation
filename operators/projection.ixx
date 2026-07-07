@@ -3,14 +3,14 @@ module;
 #include <cuda_runtime.h>
 #include <cusparse.h>
 
-export module keyframe.operators.projection;
+export module xayah.operators.projection;
 import std;
-import keyframe.field;
-import keyframe.boundary;
+import xayah.core.field;
+import xayah.core.boundary;
 
-export namespace kfs::operators {
+export namespace xayah::operators {
     struct Projection final {
-        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, const boundary::PackedScalarBoundary3D& pressure_boundary, std::int32_t pressure_iterations);
+        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, const core::boundary::PackedScalarBoundary3D& pressure_boundary, std::int32_t pressure_iterations);
         ~Projection() noexcept;
         Projection(const Projection&)                = delete;
         Projection& operator=(const Projection&)     = delete;
@@ -19,7 +19,7 @@ export namespace kfs::operators {
 
         std::int32_t pressure_iterations{0};
 
-        void operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const boundary::PackedVectorBoundary3D& velocity_boundary, float delta_seconds);
+        void operator()(core::field::StaggeredVectorField3D& destination, core::field::StaggeredVectorField3D& working, const core::field::CenteredVectorField3D& constraint_velocity, const core::field::IndexedField3D& cell_indices, const core::boundary::PackedVectorBoundary3D& velocity_boundary, float delta_seconds);
 
     private:
         void initialize();
@@ -28,7 +28,7 @@ export namespace kfs::operators {
         CUstream_st* const stream{nullptr};
         const std::array<std::int32_t, 3> resolution{0, 0, 0};
         const float cell_size{0.0f};
-        const boundary::PackedScalarBoundary3D pressure_boundary{};
+        const core::boundary::PackedScalarBoundary3D pressure_boundary{};
 
         cublasHandle_t cublas{nullptr};
         cusparseHandle_t cusparse{nullptr};
@@ -55,4 +55,4 @@ export namespace kfs::operators {
         float* pressure_one{nullptr};
         void* spmv_buffer{nullptr};
     };
-} // namespace kfs::operators
+} // namespace xayah::operators

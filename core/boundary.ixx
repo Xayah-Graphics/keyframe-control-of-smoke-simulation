@@ -1,11 +1,11 @@
 module;
 #include <cuda_runtime.h>
 
-export module keyframe.boundary;
+export module xayah.core.boundary;
 import std;
-import keyframe.field;
+import xayah.core.field;
 
-export namespace kfs::boundary {
+export namespace xayah::core::boundary {
     enum class ScalarBoundaryMode : std::uint32_t {
         fixed_value   = 0,
         zero_gradient = 1,
@@ -90,4 +90,4 @@ export namespace kfs::boundary {
     void enforce(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values, const field::IndexedField3D& cell_indices, const field::CenteredVectorField3D& constraint_values, const PackedVectorBoundary3D& boundary);
     void synchronize(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values);
     void extrapolate(cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const field::IndexedField3D& cell_indices, const PackedScalarBoundary3D& boundary);
-} // namespace kfs::boundary
+} // namespace xayah::core::boundary

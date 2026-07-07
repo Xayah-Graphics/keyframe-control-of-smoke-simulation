@@ -1,5 +1,5 @@
-#include "keyframe.field.cuh"
-#include "keyframe.field.h"
+#include "field.cuh"
+#include "field.h"
 #include <algorithm>
 #include <array>
 #include <cfloat>
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace kfs::cuda {
+namespace xayah::core::field::cuda {
     void free_device_buffers(void** const pointers, const std::size_t count) noexcept {
         if (pointers == nullptr) return;
         for (std::size_t i = 0; i < count; ++i) {
@@ -19,9 +19,9 @@ namespace kfs::cuda {
             pointers[i] = nullptr;
         }
     }
-} // namespace kfs::cuda
+} // namespace xayah::core::field::cuda
 
-namespace kfs::cuda::field {
+namespace xayah::core::field::cuda {
     namespace {
         constexpr std::uint32_t selection_marked   = 0u;
         constexpr std::uint32_t selection_unmarked = 1u;
@@ -307,4 +307,4 @@ namespace kfs::cuda::field {
         }
         static_cast<void>(cudaFree(device_blocks));
     }
-} // namespace kfs::cuda::field
+} // namespace xayah::core::field::cuda

@@ -71,40 +71,40 @@ add_library(libkeyframe)
 target_sources(
         libkeyframe
         PRIVATE
-        keyframe.field.cu
-        keyframe.field.cpp
-        keyframe.field.cuh
-        keyframe.field.h
-        keyframe.boundary.cpp
-        keyframe.boundary.cu
-        keyframe.boundary.cuh
-        keyframe.boundary.h
-        keyframe.collider.cpp
-        keyframe.collider.cu
-        keyframe.collider.h
-        operators/keyframe.operators.advection.cpp
-        operators/keyframe.operators.advection.cu
-        operators/keyframe.operators.advection.h
-        operators/keyframe.operators.emitter.cpp
-        operators/keyframe.operators.emitter.cu
-        operators/keyframe.operators.emitter.h
-        operators/keyframe.operators.projection.cpp
-        operators/keyframe.operators.projection.cu
-        operators/keyframe.operators.projection.h
-        operators/keyframe.operators.vorticity.cpp
-        operators/keyframe.operators.vorticity.cu
-        operators/keyframe.operators.vorticity.h
+        core/field.cu
+        core/field.cpp
+        core/field.cuh
+        core/field.h
+        core/boundary.cpp
+        core/boundary.cu
+        core/boundary.cuh
+        core/boundary.h
+        core/collider.cpp
+        core/collider.cu
+        core/collider.h
+        operators/advection.cpp
+        operators/advection.cu
+        operators/advection.h
+        operators/emitter.cpp
+        operators/emitter.cu
+        operators/emitter.h
+        operators/projection.cpp
+        operators/projection.cu
+        operators/projection.h
+        operators/vorticity.cpp
+        operators/vorticity.cu
+        operators/vorticity.h
         keyframe.solver.cpp
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        keyframe.field.ixx
-        keyframe.geometry.ixx
-        keyframe.boundary.ixx
-        keyframe.collider.ixx
-        operators/keyframe.operators.advection.ixx
-        operators/keyframe.operators.emitter.ixx
-        operators/keyframe.operators.projection.ixx
-        operators/keyframe.operators.vorticity.ixx
+        core/field.ixx
+        core/geometry.ixx
+        core/boundary.ixx
+        core/collider.ixx
+        operators/advection.ixx
+        operators/emitter.ixx
+        operators/projection.ixx
+        operators/vorticity.ixx
         keyframe.solver.ixx
 )
 target_link_libraries(libkeyframe PRIVATE CUDA::cudart CUDA::cublas CUDA::cusparse)

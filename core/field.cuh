@@ -1,10 +1,10 @@
-#ifndef KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_CUH
-#define KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_CUH
+#ifndef XAYAH_CORE_FIELD_CUH
+#define XAYAH_CORE_FIELD_CUH
 
 #include <cstdint>
 #include <cuda_runtime.h>
 
-namespace kfs::cuda::field {
+namespace xayah::core::field::cuda {
     __host__ __device__ inline unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) noexcept {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
     }
@@ -33,6 +33,6 @@ namespace kfs::cuda::field {
     inline dim3 staggered_grid(const std::uint32_t axis, const int nx, const int ny, const int nz, const dim3 block) noexcept {
         return dim3{ceil_div_u32(static_cast<std::uint64_t>(extent(axis, 0u, nx, ny, nz)), block.x), ceil_div_u32(static_cast<std::uint64_t>(extent(axis, 1u, nx, ny, nz)), block.y), ceil_div_u32(static_cast<std::uint64_t>(extent(axis, 2u, nx, ny, nz)), block.z)};
     }
-} // namespace kfs::cuda::field
+} // namespace xayah::core::field::cuda
 
-#endif // KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_CUH
+#endif // XAYAH_CORE_FIELD_CUH

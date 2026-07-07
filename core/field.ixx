@@ -1,10 +1,10 @@
 module;
 #include <cuda_runtime.h>
 
-export module keyframe.field;
+export module xayah.core.field;
 import std;
 
-export namespace kfs::field {
+export namespace xayah::core::field {
     enum class IndexSelection : std::uint32_t {
         marked   = 0u,
         unmarked = 1u,
@@ -131,4 +131,4 @@ export namespace kfs::field {
     void sample(cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source);
 
     [[nodiscard]] ScalarFieldStats stats(cudaStream_t stream, const ScalarField3D& source);
-} // namespace kfs::field
+} // namespace xayah::core::field

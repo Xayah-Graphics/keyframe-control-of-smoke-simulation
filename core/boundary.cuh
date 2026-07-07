@@ -1,11 +1,11 @@
-#ifndef KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_BOUNDARY_CUH
-#define KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_BOUNDARY_CUH
+#ifndef XAYAH_CORE_BOUNDARY_CUH
+#define XAYAH_CORE_BOUNDARY_CUH
 
-#include "keyframe.field.cuh"
+#include "field.cuh"
 #include <cstdint>
 #include <cuda_runtime.h>
 
-namespace kfs::cuda::boundary {
+namespace xayah::core::boundary::cuda {
     constexpr std::uint32_t scalar_boundary_fixed_value   = 0u;
     constexpr std::uint32_t scalar_boundary_zero_gradient = 1u;
     constexpr std::uint32_t scalar_boundary_periodic      = 2u;
@@ -144,7 +144,7 @@ namespace kfs::cuda::boundary {
 
     __device__ inline bool cell_is_marked(const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return true;
-        return cell_indices[field::index(x, y, z, nx, ny)] != 0u;
+        return cell_indices[field::cuda::index(x, y, z, nx, ny)] != 0u;
     }
 
     __device__ inline float load_scalar(const float* values, int x, int y, int z, const int nx, const int ny, const int nz, const ScalarBoundary3D boundary) {
@@ -175,42 +175,42 @@ namespace kfs::cuda::boundary {
             else
                 return face.value;
         }
-        return values[field::index(x, y, z, nx, ny)];
+        return values[field::cuda::index(x, y, z, nx, ny)];
     }
 
     __device__ inline float load_staggered_component_boundary(const float* values, const std::uint32_t axis, const std::uint32_t boundary_dimension, const bool lower, int i, int j, int k, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
         const VectorBoundaryFace3D face = vector_face(boundary, boundary_dimension, lower);
-        i                               = clamp_int(i, 0, field::extent(axis, 0u, nx, ny, nz) - 1);
-        j                               = clamp_int(j, 0, field::extent(axis, 1u, nx, ny, nz) - 1);
-        k                               = clamp_int(k, 0, field::extent(axis, 2u, nx, ny, nz) - 1);
-        if (boundary_dimension == 0u) i = lower ? 0 : field::extent(axis, 0u, nx, ny, nz) - 1;
-        if (boundary_dimension == 1u) j = lower ? 0 : field::extent(axis, 1u, nx, ny, nz) - 1;
-        if (boundary_dimension == 2u) k = lower ? 0 : field::extent(axis, 2u, nx, ny, nz) - 1;
-        const float interior = values[field::index(axis, i, j, k, nx, ny)];
+        i                               = clamp_int(i, 0, field::cuda::extent(axis, 0u, nx, ny, nz) - 1);
+        j                               = clamp_int(j, 0, field::cuda::extent(axis, 1u, nx, ny, nz) - 1);
+        k                               = clamp_int(k, 0, field::cuda::extent(axis, 2u, nx, ny, nz) - 1);
+        if (boundary_dimension == 0u) i = lower ? 0 : field::cuda::extent(axis, 0u, nx, ny, nz) - 1;
+        if (boundary_dimension == 1u) j = lower ? 0 : field::cuda::extent(axis, 1u, nx, ny, nz) - 1;
+        if (boundary_dimension == 2u) k = lower ? 0 : field::cuda::extent(axis, 2u, nx, ny, nz) - 1;
+        const float interior = values[field::cuda::index(axis, i, j, k, nx, ny)];
         if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != boundary_dimension)) return interior;
         return 2.0f * vector_face_value(face, axis) - interior;
     }
 
     __device__ inline float load_staggered_component(const float* values, const std::uint32_t axis, int i, int j, int k, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
-        if (i < 0 || i >= field::extent(axis, 0u, nx, ny, nz)) {
+        if (i < 0 || i >= field::cuda::extent(axis, 0u, nx, ny, nz)) {
             if (vector_periodic_pair(boundary, 0u) && nx > 0)
                 i = wrap_index(i, nx);
             else
                 return load_staggered_component_boundary(values, axis, 0u, i < 0, i, j, k, nx, ny, nz, boundary);
         }
-        if (j < 0 || j >= field::extent(axis, 1u, nx, ny, nz)) {
+        if (j < 0 || j >= field::cuda::extent(axis, 1u, nx, ny, nz)) {
             if (vector_periodic_pair(boundary, 1u) && ny > 0)
                 j = wrap_index(j, ny);
             else
                 return load_staggered_component_boundary(values, axis, 1u, j < 0, i, j, k, nx, ny, nz, boundary);
         }
-        if (k < 0 || k >= field::extent(axis, 2u, nx, ny, nz)) {
+        if (k < 0 || k >= field::cuda::extent(axis, 2u, nx, ny, nz)) {
             if (vector_periodic_pair(boundary, 2u) && nz > 0)
                 k = wrap_index(k, nz);
             else
                 return load_staggered_component_boundary(values, axis, 2u, k < 0, i, j, k, nx, ny, nz, boundary);
         }
-        return values[field::index(axis, i, j, k, nx, ny)];
+        return values[field::cuda::index(axis, i, j, k, nx, ny)];
     }
 
     __device__ inline float load_centered_scalar(const float* values, int x, int y, int z, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
@@ -232,7 +232,7 @@ namespace kfs::cuda::boundary {
             else
                 z = z < 0 ? 0 : nz - 1;
         }
-        return values[field::index(x, y, z, nx, ny)];
+        return values[field::cuda::index(x, y, z, nx, ny)];
     }
 
     __device__ inline float load_centered_component(const float* values, const std::uint32_t axis, int x, int y, int z, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
@@ -241,7 +241,7 @@ namespace kfs::cuda::boundary {
             if (vector_periodic_pair(boundary, 0u) && nx > 0) {
                 x = wrap_index(x, nx);
             } else {
-                const float interior = values[field::index(x < 0 ? 0 : nx - 1, clamp_int(y, 0, ny - 1), clamp_int(z, 0, nz - 1), nx, ny)];
+                const float interior = values[field::cuda::index(x < 0 ? 0 : nx - 1, clamp_int(y, 0, ny - 1), clamp_int(z, 0, nz - 1), nx, ny)];
                 if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != 0u)) return interior;
                 return 2.0f * vector_face_value(face, axis) - interior;
             }
@@ -251,7 +251,7 @@ namespace kfs::cuda::boundary {
             if (vector_periodic_pair(boundary, 1u) && ny > 0) {
                 y = wrap_index(y, ny);
             } else {
-                const float interior = values[field::index(clamp_int(x, 0, nx - 1), y < 0 ? 0 : ny - 1, clamp_int(z, 0, nz - 1), nx, ny)];
+                const float interior = values[field::cuda::index(clamp_int(x, 0, nx - 1), y < 0 ? 0 : ny - 1, clamp_int(z, 0, nz - 1), nx, ny)];
                 if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != 1u)) return interior;
                 return 2.0f * vector_face_value(face, axis) - interior;
             }
@@ -261,19 +261,19 @@ namespace kfs::cuda::boundary {
             if (vector_periodic_pair(boundary, 2u) && nz > 0) {
                 z = wrap_index(z, nz);
             } else {
-                const float interior = values[field::index(clamp_int(x, 0, nx - 1), clamp_int(y, 0, ny - 1), z < 0 ? 0 : nz - 1, nx, ny)];
+                const float interior = values[field::cuda::index(clamp_int(x, 0, nx - 1), clamp_int(y, 0, ny - 1), z < 0 ? 0 : nz - 1, nx, ny)];
                 if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != 2u)) return interior;
                 return 2.0f * vector_face_value(face, axis) - interior;
             }
         }
-        return values[field::index(x, y, z, nx, ny)];
+        return values[field::cuda::index(x, y, z, nx, ny)];
     }
 
     __device__ inline float constraint_value(const float* constraint_values, const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return 0.0f;
-        if (cell_indices[field::index(x, y, z, nx, ny)] == 0u) return 0.0f;
-        return constraint_values[field::index(x, y, z, nx, ny)];
+        if (cell_indices[field::cuda::index(x, y, z, nx, ny)] == 0u) return 0.0f;
+        return constraint_values[field::cuda::index(x, y, z, nx, ny)];
     }
-} // namespace kfs::cuda::boundary
+} // namespace xayah::core::boundary::cuda
 
-#endif // KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_BOUNDARY_CUH
+#endif // XAYAH_CORE_BOUNDARY_CUH

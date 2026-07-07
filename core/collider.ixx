@@ -1,12 +1,12 @@
 module;
 #include <cuda_runtime.h>
 
-export module keyframe.collider;
+export module xayah.core.collider;
 import std;
-import keyframe.field;
-export import keyframe.geometry;
+import xayah.core.field;
+export import xayah.core.geometry;
 
-export namespace kfs::collider {
+export namespace xayah::core::collider {
     struct Collider final {
         std::variant<geometry::Ellipsoid, geometry::Box> shape{geometry::Ellipsoid{}};
         std::array<float, 3> velocity{};
@@ -18,4 +18,4 @@ export namespace kfs::collider {
 
         void rasterize(cudaStream_t stream, field::IndexedField3D& cell_indices, field::CenteredVectorField3D& constraint_velocity, field::ScalarField3D& constraint_scalar, float cell_size) const;
     };
-} // namespace kfs::collider
+} // namespace xayah::core::collider

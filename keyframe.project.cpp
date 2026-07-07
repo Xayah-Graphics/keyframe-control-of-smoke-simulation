@@ -25,11 +25,11 @@ module;
 
 module keyframe.project;
 
-import keyframe.field;
+import xayah.core.field;
 import keyframe.plugin;
 import keyframe.solver;
-import keyframe.collider;
-import keyframe.geometry;
+import xayah.core.collider;
+import xayah.core.geometry;
 import std;
 
 namespace kfs::project {
@@ -289,7 +289,7 @@ namespace kfs::project {
             };
         }
 
-        [[nodiscard]] plugin::Sphere ellipsoid_entity(const std::string& name, const geometry::Ellipsoid& ellipsoid, const std::string& material_name) {
+        [[nodiscard]] plugin::Sphere ellipsoid_entity(const std::string& name, const xayah::core::geometry::Ellipsoid& ellipsoid, const std::string& material_name) {
             return plugin::Sphere{
                 .name          = name,
                 .radius        = 1.0f,
@@ -302,7 +302,7 @@ namespace kfs::project {
             };
         }
 
-        [[nodiscard]] plugin::Mesh box_entity(const std::string& name, const geometry::Box& box, const std::string& material_name) {
+        [[nodiscard]] plugin::Mesh box_entity(const std::string& name, const xayah::core::geometry::Box& box, const std::string& material_name) {
             return plugin::Mesh{
                 .name = name,
                 .vertices =
@@ -381,8 +381,8 @@ namespace kfs::project {
         }
 
         struct SmokeStats final {
-            field::ScalarFieldStats density{};
-            field::ScalarFieldStats temperature{};
+            xayah::core::field::ScalarFieldStats density{};
+            xayah::core::field::ScalarFieldStats temperature{};
         };
     } // namespace
 
@@ -505,23 +505,23 @@ namespace kfs::project {
     namespace {
         void apply_scene_preset(Project::State& state, const double simulation_time_seconds) {
             if (state.smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
-            std::vector<collider::Collider>& colliders = state.smoke->colliders.items;
+            std::vector<xayah::core::collider::Collider>& colliders = state.smoke->colliders.items;
             colliders.clear();
             const std::array size = domain_size(*state.smoke);
             switch (state.preset) {
             case ScenePreset::free_plume: return;
             case ScenePreset::obstacle_gallery:
-                colliders.push_back(collider::Collider{
+                colliders.push_back(xayah::core::collider::Collider{
                     .shape =
-                        geometry::Box{
+                        xayah::core::geometry::Box{
                             .center      = {size[0] * 0.50f, size[1] * 0.40f, size[2] * 0.50f},
                             .half_extent = {size[0] * 0.075f, size[1] * 0.18f, size[2] * 0.34f},
                         },
                     .constraint_scalar = 0.0f,
                 });
-                colliders.push_back(collider::Collider{
+                colliders.push_back(xayah::core::collider::Collider{
                     .shape =
-                        geometry::Ellipsoid{
+                        xayah::core::geometry::Ellipsoid{
                             .center = {size[0] * 0.68f, size[1] * 0.34f, size[2] * 0.52f},
                             .radius = {size[0] * 0.10f, size[1] * 0.08f, size[2] * 0.18f},
                         },
@@ -532,9 +532,9 @@ namespace kfs::project {
                 {
                     constexpr float angular_speed = 1.4f;
                     const float phase             = static_cast<float>(simulation_time_seconds) * angular_speed;
-                    colliders.push_back(collider::Collider{
+                    colliders.push_back(xayah::core::collider::Collider{
                         .shape =
-                            geometry::Box{
+                            xayah::core::geometry::Box{
                                 .center =
                                     {
                                         size[0] * (0.50f + 0.24f * std::sin(phase)),
@@ -635,12 +635,12 @@ namespace kfs::project {
         void append_scene_geometry(plugin::Document& document, const solver::Solver& smoke) {
             document.spheres.push_back(ellipsoid_entity(emitter_entity_name, smoke.emitter.source.region, emitter_material_name));
             for (std::size_t index = 0u; index < smoke.colliders.items.size(); ++index) {
-                const collider::Collider& item = smoke.colliders.items[index];
-                if (const geometry::Ellipsoid* const ellipsoid = std::get_if<geometry::Ellipsoid>(&item.shape); ellipsoid != nullptr) {
+                const xayah::core::collider::Collider& item = smoke.colliders.items[index];
+                if (const xayah::core::geometry::Ellipsoid* const ellipsoid = std::get_if<xayah::core::geometry::Ellipsoid>(&item.shape); ellipsoid != nullptr) {
                     document.spheres.push_back(ellipsoid_entity(std::format("Keyframe Collider Ellipsoid {}", index + 1u), *ellipsoid, collider_sphere_material_name));
                     continue;
                 }
-                if (const geometry::Box* const box = std::get_if<geometry::Box>(&item.shape); box != nullptr) {
+                if (const xayah::core::geometry::Box* const box = std::get_if<xayah::core::geometry::Box>(&item.shape); box != nullptr) {
                     document.meshes.push_back(box_entity(std::format("Keyframe Collider Box {}", index + 1u), *box, collider_box_material_name));
                 }
             }
@@ -698,8 +698,8 @@ namespace kfs::project {
         apply_scene_preset(*state, state->simulation_time_seconds);
         publish_domain_if_ready(*state);
         state->latest_smoke_stats = SmokeStats{
-            .density     = field::stats(state->smoke->stream, state->smoke->device.density_data),
-            .temperature = field::stats(state->smoke->stream, state->smoke->device.temperature_data),
+            .density     = xayah::core::field::stats(state->smoke->stream, state->smoke->device.density_data),
+            .temperature = xayah::core::field::stats(state->smoke->stream, state->smoke->device.temperature_data),
         };
         return Project{std::move(state)};
     }
@@ -723,8 +723,8 @@ namespace kfs::project {
         this->state->simulation_time_seconds = next_simulation_time_seconds;
         this->state->latest_step_stats       = *stats;
         this->state->latest_smoke_stats      = SmokeStats{
-                 .density     = field::stats(this->state->smoke->stream, this->state->smoke->device.density_data),
-                 .temperature = field::stats(this->state->smoke->stream, this->state->smoke->device.temperature_data),
+                 .density     = xayah::core::field::stats(this->state->smoke->stream, this->state->smoke->device.density_data),
+                 .temperature = xayah::core::field::stats(this->state->smoke->stream, this->state->smoke->device.temperature_data),
         };
         publish_domain_if_ready(*this->state);
         static_cast<void>(publish_density_if_ready(*this->state));

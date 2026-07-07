@@ -1,12 +1,12 @@
 module;
-#include "keyframe.field.h"
+#include "field.h"
 
 #include <cuda_runtime.h>
 
-module keyframe.field;
+module xayah.core.field;
 import std;
 
-namespace kfs::field {
+namespace xayah::core::field {
     namespace {
         std::uint64_t cell_element_count(const std::array<std::int32_t, 3>& resolution) {
             if (resolution[0] == 0 && resolution[1] == 0 && resolution[2] == 0) return 0u;
@@ -207,19 +207,19 @@ namespace kfs::field {
     }
 
     void fill(const cudaStream_t stream, ScalarField3D& values, const float value) {
-        cuda::field::fill(stream, values.data, values.count(), value);
+        cuda::fill(stream, values.data, values.count(), value);
     }
 
     void fill(const cudaStream_t stream, IndexedField3D& values, const std::uint32_t value) {
-        cuda::field::fill(stream, values.data, values.count(), value);
+        cuda::fill(stream, values.data, values.count(), value);
     }
 
     void fill(const cudaStream_t stream, CenteredVectorField3D& values, const float value) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::fill(stream, values.data[axis], values.count(), value);
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::fill(stream, values.data[axis], values.count(), value);
     }
 
     void fill(const cudaStream_t stream, StaggeredVectorField3D& values, const float value) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::fill(stream, values.data[axis], values.count(axis), value);
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::fill(stream, values.data[axis], values.count(axis), value);
     }
 
     void copy(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source) {
@@ -231,7 +231,7 @@ namespace kfs::field {
     }
 
     void copy(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices, const IndexSelection selection) {
-        cuda::field::copy(stream, destination.data, source.data, indices.data, destination.count(), static_cast<std::uint32_t>(selection));
+        cuda::copy(stream, destination.data, source.data, indices.data, destination.count(), static_cast<std::uint32_t>(selection));
     }
 
     void copy(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source) {
@@ -281,80 +281,80 @@ namespace kfs::field {
     }
 
     void add(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right) {
-        cuda::field::add(stream, destination.data, left.data, right.data, destination.count());
+        cuda::add(stream, destination.data, left.data, right.data, destination.count());
     }
 
     void add(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, const float scale) {
-        cuda::field::add(stream, destination.data, current.data, source.data, destination.count(), scale);
+        cuda::add(stream, destination.data, current.data, source.data, destination.count(), scale);
     }
 
     void add(const cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const float scale, const float bias, const IndexedField3D& indices, const IndexSelection selection) {
-        cuda::field::add(stream, destination.data[axis], source.data, indices.data, destination.count(), scale, bias, static_cast<std::uint32_t>(selection));
+        cuda::add(stream, destination.data[axis], source.data, indices.data, destination.count(), scale, bias, static_cast<std::uint32_t>(selection));
     }
 
     void add(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::add(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count());
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::add(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count());
     }
 
     void add(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, const float scale) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::add(stream, destination.data[axis], current.data[axis], source.data[axis], destination.count(), scale);
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::add(stream, destination.data[axis], current.data[axis], source.data[axis], destination.count(), scale);
     }
 
     void add(const cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::add(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count(axis));
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::add(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count(axis));
     }
 
     void add(const cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, const float scale) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::add(stream, destination.data[axis], current.data[axis], source.data[axis], destination.count(axis), scale);
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::add(stream, destination.data[axis], current.data[axis], source.data[axis], destination.count(axis), scale);
     }
 
     void add(const cudaStream_t stream, StaggeredVectorField3D& destination, const CenteredVectorField3D& source, const float scale) {
-        cuda::field::add(stream, destination.data[0], destination.data[1], destination.data[2], source.data[0], source.data[1], source.data[2], destination.resolution, scale);
+        cuda::add(stream, destination.data[0], destination.data[1], destination.data[2], source.data[0], source.data[1], source.data[2], destination.resolution, scale);
     }
 
     void subtract(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right) {
-        cuda::field::subtract(stream, destination.data, left.data, right.data, destination.count());
+        cuda::subtract(stream, destination.data, left.data, right.data, destination.count());
     }
 
     void subtract(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::subtract(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count());
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::subtract(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count());
     }
 
     void subtract(const cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::subtract(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count(axis));
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::subtract(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count(axis));
     }
 
     void multiply(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right) {
-        cuda::field::multiply(stream, destination.data, left.data, right.data, destination.count());
+        cuda::multiply(stream, destination.data, left.data, right.data, destination.count());
     }
 
     void multiply(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::multiply(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count());
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::multiply(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count());
     }
 
     void multiply(const cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::multiply(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count(axis));
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::multiply(stream, destination.data[axis], left.data[axis], right.data[axis], destination.count(axis));
     }
 
     void scale(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const float factor) {
-        cuda::field::scale(stream, destination.data, source.data, destination.count(), factor);
+        cuda::scale(stream, destination.data, source.data, destination.count(), factor);
     }
 
     void scale(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source, const float factor) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::scale(stream, destination.data[axis], source.data[axis], destination.count(), factor);
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::scale(stream, destination.data[axis], source.data[axis], destination.count(), factor);
     }
 
     void scale(const cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source, const float factor) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::field::scale(stream, destination.data[axis], source.data[axis], destination.count(axis), factor);
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::scale(stream, destination.data[axis], source.data[axis], destination.count(axis), factor);
     }
 
     void sample(const cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source) {
-        cuda::field::sample(stream, destination.data[0], destination.data[1], destination.data[2], source.data[0], source.data[1], source.data[2], destination.resolution);
+        cuda::sample(stream, destination.data[0], destination.data[1], destination.data[2], source.data[0], source.data[1], source.data[2], destination.resolution);
     }
 
     ScalarFieldStats stats(const cudaStream_t stream, const ScalarField3D& source) {
-        cuda::field::ScalarStats raw{};
-        cuda::field::stats(stream, source.data, source.count(), raw);
+        cuda::ScalarStats raw{};
+        cuda::stats(stream, source.data, source.count(), raw);
         return ScalarFieldStats{
             .min           = raw.min,
             .max           = raw.max,
@@ -363,4 +363,4 @@ namespace kfs::field {
             .nonzero_count = raw.nonzero_count,
         };
     }
-} // namespace kfs::field
+} // namespace xayah::core::field

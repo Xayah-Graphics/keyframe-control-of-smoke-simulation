@@ -1,15 +1,15 @@
 module;
 #include <cuda_runtime.h>
 
-export module keyframe.operators.emitter;
+export module xayah.operators.emitter;
 import std;
-import keyframe.field;
-export import keyframe.geometry;
+import xayah.core.field;
+export import xayah.core.geometry;
 
-export namespace kfs::operators {
+export namespace xayah::operators {
     struct Emitter final {
         struct Source final {
-            geometry::Ellipsoid region{
+            core::geometry::Ellipsoid region{
                 .center = {0.6f, 0.216f, 0.6f},
                 .radius = {0.156f, 0.144f, 0.156f},
             };
@@ -24,11 +24,11 @@ export namespace kfs::operators {
 
         Source source{};
 
-        void operator()(field::ScalarField3D& destination, const field::ScalarField3D& current, float rate, float delta_seconds) const;
+        void operator()(core::field::ScalarField3D& destination, const core::field::ScalarField3D& current, float rate, float delta_seconds) const;
 
     private:
         CUstream_st* const stream{nullptr};
         const std::array<std::int32_t, 3> resolution{0, 0, 0};
         const float cell_size{0.0f};
     };
-} // namespace kfs::operators
+} // namespace xayah::operators

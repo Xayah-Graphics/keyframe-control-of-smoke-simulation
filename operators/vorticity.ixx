@@ -1,12 +1,12 @@
 module;
 #include <cuda_runtime.h>
 
-export module keyframe.operators.vorticity;
+export module xayah.operators.vorticity;
 import std;
-import keyframe.field;
-import keyframe.boundary;
+import xayah.core.field;
+import xayah.core.boundary;
 
-export namespace kfs::operators {
+export namespace xayah::operators {
     struct Vorticity final {
         Vorticity(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, float vorticity_confinement);
         Vorticity(const Vorticity&)                = delete;
@@ -16,13 +16,13 @@ export namespace kfs::operators {
 
         float confinement{0.0f};
 
-        void operator()(field::CenteredVectorField3D& destination, const field::CenteredVectorField3D& source, const field::IndexedField3D& cell_indices, const boundary::PackedVectorBoundary3D& vector_boundary);
+        void operator()(core::field::CenteredVectorField3D& destination, const core::field::CenteredVectorField3D& source, const core::field::IndexedField3D& cell_indices, const core::boundary::PackedVectorBoundary3D& vector_boundary);
 
     private:
         CUstream_st* const stream{nullptr};
         const std::array<std::int32_t, 3> resolution{0, 0, 0};
         const float cell_size{0.0f};
-        field::CenteredVectorField3D vorticity{{0, 0, 0}};
-        field::ScalarField3D vorticity_magnitude{{0, 0, 0}};
+        core::field::CenteredVectorField3D vorticity{{0, 0, 0}};
+        core::field::ScalarField3D vorticity_magnitude{{0, 0, 0}};
     };
-} // namespace kfs::operators
+} // namespace xayah::operators

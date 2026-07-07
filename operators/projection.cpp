@@ -1,16 +1,16 @@
 module;
-#include "keyframe.operators.projection.h"
+#include "projection.h"
 
-#include "../keyframe.field.h"
+#include "../core/field.h"
 #include <cublas_v2.h>
 #include <cusparse.h>
 
-module keyframe.operators.projection;
+module xayah.operators.projection;
 import std;
-import keyframe.field;
-import keyframe.boundary;
+import xayah.core.field;
+import xayah.core.boundary;
 
-namespace kfs::operators {
+namespace xayah::operators {
     namespace {
         std::uint64_t cell_count(const std::array<std::int32_t, 3> resolution) {
             return static_cast<std::uint64_t>(resolution[0]) * static_cast<std::uint64_t>(resolution[1]) * static_cast<std::uint64_t>(resolution[2]);
@@ -49,7 +49,7 @@ namespace kfs::operators {
 
     } // namespace
 
-    Projection::Projection(cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const boundary::PackedScalarBoundary3D& pressure_boundary, const std::int32_t pressure_iterations) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_boundary{pressure_boundary}, pressure_iterations{pressure_iterations} {
+    Projection::Projection(cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const core::boundary::PackedScalarBoundary3D& pressure_boundary, const std::int32_t pressure_iterations) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_boundary{pressure_boundary}, pressure_iterations{pressure_iterations} {
         try {
             this->initialize();
         } catch (...) {
@@ -156,7 +156,7 @@ namespace kfs::operators {
             if (this->pressure_vec_ap != nullptr) cusparseDestroyDnVec(this->pressure_vec_ap);
             if (this->cublas != nullptr) cublasDestroy(this->cublas);
             if (this->cusparse != nullptr) cusparseDestroy(this->cusparse);
-            cuda::free_device_buffers(this->pressure, this->pressure_rhs, this->pressure_anchor, this->pressure_row_offsets, this->pressure_column_indices, this->pressure_values, this->pcg_r, this->pcg_p, this->pcg_ap, this->pressure_dot_rz, this->pressure_dot_pap, this->pressure_dot_rr, this->pressure_alpha, this->pressure_negative_alpha, this->pressure_beta, this->pressure_one, this->spmv_buffer);
+            core::field::cuda::free_device_buffers(this->pressure, this->pressure_rhs, this->pressure_anchor, this->pressure_row_offsets, this->pressure_column_indices, this->pressure_values, this->pcg_r, this->pcg_p, this->pcg_ap, this->pressure_dot_rz, this->pressure_dot_pap, this->pressure_dot_rr, this->pressure_alpha, this->pressure_negative_alpha, this->pressure_beta, this->pressure_one, this->spmv_buffer);
         } catch (...) {
         }
         this->cublas           = nullptr;
@@ -167,7 +167,7 @@ namespace kfs::operators {
         this->spmv_buffer_size = 0;
     }
 
-    void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const boundary::PackedVectorBoundary3D& velocity_boundary, const float delta_seconds) {
+    void Projection::operator()(core::field::StaggeredVectorField3D& destination, core::field::StaggeredVectorField3D& working, const core::field::CenteredVectorField3D& constraint_velocity, const core::field::IndexedField3D& cell_indices, const core::boundary::PackedVectorBoundary3D& velocity_boundary, const float delta_seconds) {
         const std::uint64_t cells64                  = cell_count(this->resolution);
         const int cells                              = static_cast<int>(cells64);
         const std::size_t bytes                      = cell_bytes(this->resolution);
@@ -178,10 +178,10 @@ namespace kfs::operators {
         const float* velocity_boundary_values        = velocity_boundary.values.data();
         const std::uint32_t* pressure_boundary_modes = this->pressure_boundary.modes.data();
         const float* pressure_boundary_values        = this->pressure_boundary.values.data();
-        cuda::operators::projection::reset_pressure_anchor(this->stream, this->pressure_anchor, cells);
-        cuda::operators::projection::find_pressure_anchor(this->stream, this->pressure_anchor, cell_indices.data, cells64);
-        cuda::operators::projection::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], cell_indices.data, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, pressure_boundary_modes, pressure_boundary_values);
-        cuda::operators::projection::build_pressure_matrix(this->stream, this->pressure_values, this->pressure_row_offsets, this->pressure_column_indices, cell_indices.data, this->pressure_anchor, nx, ny, nz, pressure_boundary_modes);
+        projection::cuda::reset_pressure_anchor(this->stream, this->pressure_anchor, cells);
+        projection::cuda::find_pressure_anchor(this->stream, this->pressure_anchor, cell_indices.data, cells64);
+        projection::cuda::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], cell_indices.data, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, pressure_boundary_modes, pressure_boundary_values);
+        projection::cuda::build_pressure_matrix(this->stream, this->pressure_values, this->pressure_row_offsets, this->pressure_column_indices, cell_indices.data, this->pressure_anchor, nx, ny, nz, pressure_boundary_modes);
         if (const cudaError_t status = cudaMemsetAsync(this->pressure, 0, bytes, this->stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync projection pressure: "} + cudaGetErrorString(status)};
         if (const cublasStatus_t status = cublasScopy(this->cublas, cells, this->pressure_rhs, 1, this->pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection rhs"};
         if (const cublasStatus_t status = cublasScopy(this->cublas, cells, this->pcg_r, 1, this->pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection pcg_p"};
@@ -191,22 +191,22 @@ namespace kfs::operators {
         for (int iteration = 0; iteration < this->pressure_iterations; ++iteration) {
             if (const cusparseStatus_t status = cusparseSpMV(this->cusparse, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, this->pressure_matrix, this->pressure_vec_p, &zero, this->pressure_vec_ap, CUDA_R_32F, CUSPARSE_SPMV_ALG_DEFAULT, this->spmv_buffer); status != CUSPARSE_STATUS_SUCCESS) throw std::runtime_error{"cusparseSpMV projection"};
             if (const cublasStatus_t status = cublasSdot(this->cublas, cells, this->pcg_p, 1, this->pcg_ap, 1, this->pressure_dot_pap); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSdot projection pressure_dot_pap"};
-            cuda::operators::projection::compute_ratio(this->stream, this->pressure_alpha, this->pressure_dot_rz, this->pressure_dot_pap);
+            projection::cuda::compute_ratio(this->stream, this->pressure_alpha, this->pressure_dot_rz, this->pressure_dot_pap);
             if (const cublasStatus_t status = cublasSaxpy(this->cublas, cells, this->pressure_alpha, this->pcg_p, 1, this->pressure, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSaxpy projection pressure"};
-            cuda::operators::projection::negate_scalar(this->stream, this->pressure_negative_alpha, this->pressure_alpha);
+            projection::cuda::negate_scalar(this->stream, this->pressure_negative_alpha, this->pressure_alpha);
             if (const cublasStatus_t status = cublasSaxpy(this->cublas, cells, this->pressure_negative_alpha, this->pcg_ap, 1, this->pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSaxpy projection pcg_r"};
             if (const cublasStatus_t status = cublasSdot(this->cublas, cells, this->pcg_r, 1, this->pcg_r, 1, this->pressure_dot_rr); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSdot projection rho_new"};
-            cuda::operators::projection::compute_ratio(this->stream, this->pressure_beta, this->pressure_dot_rr, this->pressure_dot_rz);
+            projection::cuda::compute_ratio(this->stream, this->pressure_beta, this->pressure_dot_rr, this->pressure_dot_rz);
             if (const cublasStatus_t status = cublasSscal(this->cublas, cells, this->pressure_beta, this->pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSscal projection pcg_p"};
             if (const cublasStatus_t status = cublasSaxpy(this->cublas, cells, this->pressure_one, this->pcg_r, 1, this->pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasSaxpy projection pcg_p"};
             if (const cublasStatus_t status = cublasScopy(this->cublas, 1, this->pressure_dot_rr, 1, this->pressure_dot_rz, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection rho"};
         }
 
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-            cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_indices.data, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, velocity_boundary_modes, velocity_boundary_values);
-            boundary::enforce(this->stream, axis, working, cell_indices, constraint_velocity, velocity_boundary);
-            if (velocity_boundary.periodic[axis]) boundary::synchronize(this->stream, axis, working);
+            projection::cuda::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_indices.data, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, velocity_boundary_modes, velocity_boundary_values);
+            core::boundary::enforce(this->stream, axis, working, cell_indices, constraint_velocity, velocity_boundary);
+            if (velocity_boundary.periodic[axis]) core::boundary::synchronize(this->stream, axis, working);
         }
-        field::copy(this->stream, destination, working);
+        core::field::copy(this->stream, destination, working);
     }
-} // namespace kfs::operators
+} // namespace xayah::operators
