@@ -5,7 +5,7 @@
 #include <string>
 
 namespace kfs::cuda::operators::vorticity {
-    __global__ void compute_vorticity_kernel(float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const boundary::FlowBoundary boundary_config) {
+    __global__ void compute_vorticity_kernel(float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const boundary::VectorBoundary3D boundary_config) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -20,12 +20,12 @@ namespace kfs::cuda::operators::vorticity {
             return;
         }
 
-        const float dvz_dy = 0.5f * (boundary::load_center_velocity_component(velocity_z, 2, x, y + 1, z, nx, ny, nz, boundary_config) - boundary::load_center_velocity_component(velocity_z, 2, x, y - 1, z, nx, ny, nz, boundary_config)) / h;
-        const float dvy_dz = 0.5f * (boundary::load_center_velocity_component(velocity_y, 1, x, y, z + 1, nx, ny, nz, boundary_config) - boundary::load_center_velocity_component(velocity_y, 1, x, y, z - 1, nx, ny, nz, boundary_config)) / h;
-        const float dvx_dz = 0.5f * (boundary::load_center_velocity_component(velocity_x, 0, x, y, z + 1, nx, ny, nz, boundary_config) - boundary::load_center_velocity_component(velocity_x, 0, x, y, z - 1, nx, ny, nz, boundary_config)) / h;
-        const float dvz_dx = 0.5f * (boundary::load_center_velocity_component(velocity_z, 2, x + 1, y, z, nx, ny, nz, boundary_config) - boundary::load_center_velocity_component(velocity_z, 2, x - 1, y, z, nx, ny, nz, boundary_config)) / h;
-        const float dvy_dx = 0.5f * (boundary::load_center_velocity_component(velocity_y, 1, x + 1, y, z, nx, ny, nz, boundary_config) - boundary::load_center_velocity_component(velocity_y, 1, x - 1, y, z, nx, ny, nz, boundary_config)) / h;
-        const float dvx_dy = 0.5f * (boundary::load_center_velocity_component(velocity_x, 0, x, y + 1, z, nx, ny, nz, boundary_config) - boundary::load_center_velocity_component(velocity_x, 0, x, y - 1, z, nx, ny, nz, boundary_config)) / h;
+        const float dvz_dy = 0.5f * (boundary::load_centered_component(velocity_z, 2u, x, y + 1, z, nx, ny, nz, boundary_config) - boundary::load_centered_component(velocity_z, 2u, x, y - 1, z, nx, ny, nz, boundary_config)) / h;
+        const float dvy_dz = 0.5f * (boundary::load_centered_component(velocity_y, 1u, x, y, z + 1, nx, ny, nz, boundary_config) - boundary::load_centered_component(velocity_y, 1u, x, y, z - 1, nx, ny, nz, boundary_config)) / h;
+        const float dvx_dz = 0.5f * (boundary::load_centered_component(velocity_x, 0u, x, y, z + 1, nx, ny, nz, boundary_config) - boundary::load_centered_component(velocity_x, 0u, x, y, z - 1, nx, ny, nz, boundary_config)) / h;
+        const float dvz_dx = 0.5f * (boundary::load_centered_component(velocity_z, 2u, x + 1, y, z, nx, ny, nz, boundary_config) - boundary::load_centered_component(velocity_z, 2u, x - 1, y, z, nx, ny, nz, boundary_config)) / h;
+        const float dvy_dx = 0.5f * (boundary::load_centered_component(velocity_y, 1u, x + 1, y, z, nx, ny, nz, boundary_config) - boundary::load_centered_component(velocity_y, 1u, x - 1, y, z, nx, ny, nz, boundary_config)) / h;
+        const float dvx_dy = 0.5f * (boundary::load_centered_component(velocity_x, 0u, x, y + 1, z, nx, ny, nz, boundary_config) - boundary::load_centered_component(velocity_x, 0u, x, y - 1, z, nx, ny, nz, boundary_config)) / h;
 
         const float wx = dvz_dy - dvy_dz;
         const float wy = dvx_dz - dvz_dx;
@@ -37,16 +37,16 @@ namespace kfs::cuda::operators::vorticity {
         omega_magnitude[index] = sqrtf(wx * wx + wy * wy + wz * wz);
     }
 
-    __global__ void add_confinement_kernel(float* destination_x, float* destination_y, float* destination_z, const float* omega_x, const float* omega_y, const float* omega_z, const float* omega_magnitude, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float epsilon, const boundary::FlowBoundary boundary_config) {
+    __global__ void add_confinement_kernel(float* destination_x, float* destination_y, float* destination_z, const float* omega_x, const float* omega_y, const float* omega_z, const float* omega_magnitude, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float epsilon, const boundary::VectorBoundary3D boundary_config) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (x >= nx || y >= ny || z >= nz) return;
         if (boundary::cell_is_marked(cell_indices, x, y, z, nx, ny, nz, boundary_config)) return;
 
-        const float grad_x   = 0.5f * (boundary::load_flow_cell(omega_magnitude, x + 1, y, z, nx, ny, nz, boundary_config) - boundary::load_flow_cell(omega_magnitude, x - 1, y, z, nx, ny, nz, boundary_config)) / h;
-        const float grad_y   = 0.5f * (boundary::load_flow_cell(omega_magnitude, x, y + 1, z, nx, ny, nz, boundary_config) - boundary::load_flow_cell(omega_magnitude, x, y - 1, z, nx, ny, nz, boundary_config)) / h;
-        const float grad_z   = 0.5f * (boundary::load_flow_cell(omega_magnitude, x, y, z + 1, nx, ny, nz, boundary_config) - boundary::load_flow_cell(omega_magnitude, x, y, z - 1, nx, ny, nz, boundary_config)) / h;
+        const float grad_x   = 0.5f * (boundary::load_centered_scalar(omega_magnitude, x + 1, y, z, nx, ny, nz, boundary_config) - boundary::load_centered_scalar(omega_magnitude, x - 1, y, z, nx, ny, nz, boundary_config)) / h;
+        const float grad_y   = 0.5f * (boundary::load_centered_scalar(omega_magnitude, x, y + 1, z, nx, ny, nz, boundary_config) - boundary::load_centered_scalar(omega_magnitude, x, y - 1, z, nx, ny, nz, boundary_config)) / h;
+        const float grad_z   = 0.5f * (boundary::load_centered_scalar(omega_magnitude, x, y, z + 1, nx, ny, nz, boundary_config) - boundary::load_centered_scalar(omega_magnitude, x, y, z - 1, nx, ny, nz, boundary_config)) / h;
         const float grad_mag = sqrtf(grad_x * grad_x + grad_y * grad_y + grad_z * grad_z);
         if (grad_mag < 1.0e-6f) return;
 
@@ -67,18 +67,18 @@ namespace kfs::cuda::operators::vorticity {
         destination_z[index] += confinement_z;
     }
 
-    void compute_vorticity(cudaStream_t stream, float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t* flow_types, const float* flow_velocity) {
+    void compute_vorticity(cudaStream_t stream, float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                              = field::centered_grid(nx, ny, nz, block);
-        const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(flow_types, flow_velocity);
+        const dim3 grid                                      = field::centered_grid(nx, ny, nz, block);
+        const boundary::VectorBoundary3D boundary_config     = boundary::make_vector_boundary(boundary_modes, boundary_values);
         compute_vorticity_kernel<<<grid, block, 0, stream>>>(omega_x, omega_y, omega_z, omega_magnitude, velocity_x, velocity_y, velocity_z, cell_indices, nx, ny, nz, cell_size, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_vorticity_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void add_confinement(cudaStream_t stream, float* destination_x, float* destination_y, float* destination_z, const float* omega_x, const float* omega_y, const float* omega_z, const float* omega_magnitude, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float cell_size, const float confinement, const std::uint32_t* flow_types) {
+    void add_confinement(cudaStream_t stream, float* destination_x, float* destination_y, float* destination_z, const float* omega_x, const float* omega_y, const float* omega_z, const float* omega_magnitude, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float cell_size, const float confinement, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                              = field::centered_grid(nx, ny, nz, block);
-        const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
+        const dim3 grid                                      = field::centered_grid(nx, ny, nz, block);
+        const boundary::VectorBoundary3D boundary_config     = boundary::make_vector_boundary(boundary_modes, boundary_values);
         add_confinement_kernel<<<grid, block, 0, stream>>>(destination_x, destination_y, destination_z, omega_x, omega_y, omega_z, omega_magnitude, cell_indices, nx, ny, nz, cell_size, confinement, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_confinement_kernel: "} + cudaGetErrorString(status)};
     }

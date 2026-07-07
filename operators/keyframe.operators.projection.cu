@@ -17,7 +17,7 @@ namespace kfs::cuda::operators::projection {
         atomicMin(pressure_anchor, static_cast<int>(index));
     }
 
-    __global__ void compute_pressure_rhs_kernel(float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::FlowBoundary boundary_config) {
+    __global__ void compute_pressure_rhs_kernel(float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::ScalarBoundary3D pressure_boundary) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -34,24 +34,24 @@ namespace kfs::cuda::operators::projection {
         }
         const float divergence = (velocity_x[field::index(0u, x + 1, y, z, nx, ny)] - velocity_x[field::index(0u, x, y, z, nx, ny)] + velocity_y[field::index(1u, x, y + 1, z, nx, ny)] - velocity_y[field::index(1u, x, y, z, nx, ny)] + velocity_z[field::index(2u, x, y, z + 1, nx, ny)] - velocity_z[field::index(2u, x, y, z, nx, ny)]) / h;
         float boundary_sum     = 0.0f;
-        if (x == 0 && boundary_config.x_minus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.x_minus.pressure;
-        if (x == nx - 1 && boundary_config.x_plus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.x_plus.pressure;
-        if (y == 0 && boundary_config.y_minus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.y_minus.pressure;
-        if (y == ny - 1 && boundary_config.y_plus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.y_plus.pressure;
-        if (z == 0 && boundary_config.z_minus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.z_minus.pressure;
-        if (z == nz - 1 && boundary_config.z_plus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.z_plus.pressure;
+        if (x == 0 && pressure_boundary.x_min.mode == boundary::scalar_boundary_fixed_value) boundary_sum += pressure_boundary.x_min.value;
+        if (x == nx - 1 && pressure_boundary.x_max.mode == boundary::scalar_boundary_fixed_value) boundary_sum += pressure_boundary.x_max.value;
+        if (y == 0 && pressure_boundary.y_min.mode == boundary::scalar_boundary_fixed_value) boundary_sum += pressure_boundary.y_min.value;
+        if (y == ny - 1 && pressure_boundary.y_max.mode == boundary::scalar_boundary_fixed_value) boundary_sum += pressure_boundary.y_max.value;
+        if (z == 0 && pressure_boundary.z_min.mode == boundary::scalar_boundary_fixed_value) boundary_sum += pressure_boundary.z_min.value;
+        if (z == nz - 1 && pressure_boundary.z_max.mode == boundary::scalar_boundary_fixed_value) boundary_sum += pressure_boundary.z_max.value;
         rhs[index] = -(h * h / dt) * divergence + boundary_sum;
     }
 
-    __device__ void accumulate_pressure_neighbor(int* active_neighbors, int& active_neighbor_count, float& diagonal, int next_x, int next_y, int next_z, const boundary::FlowBoundaryFace minus_face, const boundary::FlowBoundaryFace plus_face, const bool periodic_axis, const std::uint32_t* cell_indices, const int anchor, const int nx, const int ny, const int nz) {
+    __device__ void accumulate_pressure_neighbor(int* active_neighbors, int& active_neighbor_count, float& diagonal, int next_x, int next_y, int next_z, const boundary::ScalarBoundaryFace3D min_face, const boundary::ScalarBoundaryFace3D max_face, const bool periodic_axis, const std::uint32_t* cell_indices, const int anchor, const int nx, const int ny, const int nz) {
         if (next_x < 0 || next_x >= nx || next_y < 0 || next_y >= ny || next_z < 0 || next_z >= nz) {
             if (periodic_axis) {
                 if (next_x < 0 || next_x >= nx) next_x = boundary::wrap_index(next_x, nx);
                 if (next_y < 0 || next_y >= ny) next_y = boundary::wrap_index(next_y, ny);
                 if (next_z < 0 || next_z >= nz) next_z = boundary::wrap_index(next_z, nz);
             } else {
-                const auto face = next_x < 0 || next_y < 0 || next_z < 0 ? minus_face : plus_face;
-                if (face.type == boundary::flow_boundary_outflow) diagonal += 1.0f;
+                const boundary::ScalarBoundaryFace3D face = next_x < 0 || next_y < 0 || next_z < 0 ? min_face : max_face;
+                if (face.mode == boundary::scalar_boundary_fixed_value) diagonal += 1.0f;
                 return;
             }
         }
@@ -66,7 +66,7 @@ namespace kfs::cuda::operators::projection {
         ++active_neighbor_count;
     }
 
-    __global__ void build_pressure_matrix_kernel(float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const boundary::FlowBoundary boundary_config) {
+    __global__ void build_pressure_matrix_kernel(float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const boundary::ScalarBoundary3D pressure_boundary) {
         const int row = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         if (row >= nx * ny * nz) return;
 
@@ -77,21 +77,21 @@ namespace kfs::cuda::operators::projection {
         const int z           = yz / ny;
         const bool marked     = cell_indices[static_cast<std::uint64_t>(row)] != 0u;
         const bool special    = marked || row == anchor;
-        const bool periodic_x = boundary_config.x_minus.type == boundary::flow_boundary_periodic && boundary_config.x_plus.type == boundary::flow_boundary_periodic;
-        const bool periodic_y = boundary_config.y_minus.type == boundary::flow_boundary_periodic && boundary_config.y_plus.type == boundary::flow_boundary_periodic;
-        const bool periodic_z = boundary_config.z_minus.type == boundary::flow_boundary_periodic && boundary_config.z_plus.type == boundary::flow_boundary_periodic;
+        const bool periodic_x = boundary::scalar_periodic_pair(pressure_boundary, 0u);
+        const bool periodic_y = boundary::scalar_periodic_pair(pressure_boundary, 1u);
+        const bool periodic_z = boundary::scalar_periodic_pair(pressure_boundary, 2u);
 
         int active_neighbors[6]{};
         int active_neighbor_count = 0;
         float diagonal            = 0.0f;
 
         if (!special) {
-            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x - 1, y, z, boundary_config.x_minus, boundary_config.x_plus, periodic_x, cell_indices, anchor, nx, ny, nz);
-            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x + 1, y, z, boundary_config.x_minus, boundary_config.x_plus, periodic_x, cell_indices, anchor, nx, ny, nz);
-            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y - 1, z, boundary_config.y_minus, boundary_config.y_plus, periodic_y, cell_indices, anchor, nx, ny, nz);
-            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y + 1, z, boundary_config.y_minus, boundary_config.y_plus, periodic_y, cell_indices, anchor, nx, ny, nz);
-            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y, z - 1, boundary_config.z_minus, boundary_config.z_plus, periodic_z, cell_indices, anchor, nx, ny, nz);
-            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y, z + 1, boundary_config.z_minus, boundary_config.z_plus, periodic_z, cell_indices, anchor, nx, ny, nz);
+            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x - 1, y, z, pressure_boundary.x_min, pressure_boundary.x_max, periodic_x, cell_indices, anchor, nx, ny, nz);
+            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x + 1, y, z, pressure_boundary.x_min, pressure_boundary.x_max, periodic_x, cell_indices, anchor, nx, ny, nz);
+            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y - 1, z, pressure_boundary.y_min, pressure_boundary.y_max, periodic_y, cell_indices, anchor, nx, ny, nz);
+            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y + 1, z, pressure_boundary.y_min, pressure_boundary.y_max, periodic_y, cell_indices, anchor, nx, ny, nz);
+            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y, z - 1, pressure_boundary.z_min, pressure_boundary.z_max, periodic_z, cell_indices, anchor, nx, ny, nz);
+            accumulate_pressure_neighbor(active_neighbors, active_neighbor_count, diagonal, x, y, z + 1, pressure_boundary.z_min, pressure_boundary.z_max, periodic_z, cell_indices, anchor, nx, ny, nz);
             if (diagonal <= 0.0f) diagonal = 1.0f;
         }
 
@@ -125,34 +125,13 @@ namespace kfs::cuda::operators::projection {
         *destination = -*source;
     }
 
-    __global__ void project_velocity_x_kernel(float* velocity_x, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_x, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::FlowBoundary boundary_config) {
+    __global__ void project_velocity_x_kernel(float* velocity_x, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_x, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::VectorBoundary3D boundary_config) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i > nx || j >= ny || k >= nz) return;
 
         auto& face = velocity_x[field::index(0u, i, j, k, nx, ny)];
-        if (i == 0) {
-            const auto domain_face = boundary_config.x_minus;
-            if (domain_face.type != boundary::flow_boundary_periodic) {
-                if (domain_face.type == boundary::flow_boundary_outflow && nx > 0)
-                    face = velocity_x[field::index(0u, 1, j, k, nx, ny)];
-                else
-                    face = domain_face.velocity_x;
-                return;
-            }
-        }
-        if (i == nx) {
-            const auto domain_face = boundary_config.x_plus;
-            if (domain_face.type != boundary::flow_boundary_periodic) {
-                if (domain_face.type == boundary::flow_boundary_outflow && nx > 0)
-                    face = velocity_x[field::index(0u, nx - 1, j, k, nx, ny)];
-                else
-                    face = domain_face.velocity_x;
-                return;
-            }
-        }
-
         int left_x              = i - 1;
         int left_y              = j;
         int left_z              = k;
@@ -167,11 +146,11 @@ namespace kfs::cuda::operators::projection {
             float value  = 0.0f;
             float weight = 0.0f;
             if (left_marked) {
-                value += boundary::constraint_velocity_value(constraint_velocity_x, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary_config);
+                value += boundary::constraint_value(constraint_velocity_x, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary_config);
                 weight += 1.0f;
             }
             if (right_marked) {
-                value += boundary::constraint_velocity_value(constraint_velocity_x, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary_config);
+                value += boundary::constraint_value(constraint_velocity_x, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary_config);
                 weight += 1.0f;
             }
             face = weight > 0.0f ? value / weight : 0.0f;
@@ -184,34 +163,13 @@ namespace kfs::cuda::operators::projection {
         }
     }
 
-    __global__ void project_velocity_y_kernel(float* velocity_y, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_y, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::FlowBoundary boundary_config) {
+    __global__ void project_velocity_y_kernel(float* velocity_y, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_y, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::VectorBoundary3D boundary_config) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j > ny || k >= nz) return;
 
         auto& face = velocity_y[field::index(1u, i, j, k, nx, ny)];
-        if (j == 0) {
-            const auto domain_face = boundary_config.y_minus;
-            if (domain_face.type != boundary::flow_boundary_periodic) {
-                if (domain_face.type == boundary::flow_boundary_outflow && ny > 0)
-                    face = velocity_y[field::index(1u, i, 1, k, nx, ny)];
-                else
-                    face = domain_face.velocity_y;
-                return;
-            }
-        }
-        if (j == ny) {
-            const auto domain_face = boundary_config.y_plus;
-            if (domain_face.type != boundary::flow_boundary_periodic) {
-                if (domain_face.type == boundary::flow_boundary_outflow && ny > 0)
-                    face = velocity_y[field::index(1u, i, ny - 1, k, nx, ny)];
-                else
-                    face = domain_face.velocity_y;
-                return;
-            }
-        }
-
         int down_x             = i;
         int down_y             = j - 1;
         int down_z             = k;
@@ -226,11 +184,11 @@ namespace kfs::cuda::operators::projection {
             float value  = 0.0f;
             float weight = 0.0f;
             if (down_marked) {
-                value += boundary::constraint_velocity_value(constraint_velocity_y, cell_indices, down_x, down_y, down_z, nx, ny, nz, boundary_config);
+                value += boundary::constraint_value(constraint_velocity_y, cell_indices, down_x, down_y, down_z, nx, ny, nz, boundary_config);
                 weight += 1.0f;
             }
             if (up_marked) {
-                value += boundary::constraint_velocity_value(constraint_velocity_y, cell_indices, up_x, up_y, up_z, nx, ny, nz, boundary_config);
+                value += boundary::constraint_value(constraint_velocity_y, cell_indices, up_x, up_y, up_z, nx, ny, nz, boundary_config);
                 weight += 1.0f;
             }
             face = weight > 0.0f ? value / weight : 0.0f;
@@ -243,34 +201,13 @@ namespace kfs::cuda::operators::projection {
         }
     }
 
-    __global__ void project_velocity_z_kernel(float* velocity_z, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_z, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::FlowBoundary boundary_config) {
+    __global__ void project_velocity_z_kernel(float* velocity_z, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_z, const int nx, const int ny, const int nz, const float h, const float dt, const boundary::VectorBoundary3D boundary_config) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j >= ny || k > nz) return;
 
         auto& face = velocity_z[field::index(2u, i, j, k, nx, ny)];
-        if (k == 0) {
-            const auto domain_face = boundary_config.z_minus;
-            if (domain_face.type != boundary::flow_boundary_periodic) {
-                if (domain_face.type == boundary::flow_boundary_outflow && nz > 0)
-                    face = velocity_z[field::index(2u, i, j, 1, nx, ny)];
-                else
-                    face = domain_face.velocity_z;
-                return;
-            }
-        }
-        if (k == nz) {
-            const auto domain_face = boundary_config.z_plus;
-            if (domain_face.type != boundary::flow_boundary_periodic) {
-                if (domain_face.type == boundary::flow_boundary_outflow && nz > 0)
-                    face = velocity_z[field::index(2u, i, j, nz - 1, nx, ny)];
-                else
-                    face = domain_face.velocity_z;
-                return;
-            }
-        }
-
         int back_x              = i;
         int back_y              = j;
         int back_z              = k - 1;
@@ -285,11 +222,11 @@ namespace kfs::cuda::operators::projection {
             float value  = 0.0f;
             float weight = 0.0f;
             if (back_marked) {
-                value += boundary::constraint_velocity_value(constraint_velocity_z, cell_indices, back_x, back_y, back_z, nx, ny, nz, boundary_config);
+                value += boundary::constraint_value(constraint_velocity_z, cell_indices, back_x, back_y, back_z, nx, ny, nz, boundary_config);
                 weight += 1.0f;
             }
             if (front_marked) {
-                value += boundary::constraint_velocity_value(constraint_velocity_z, cell_indices, front_x, front_y, front_z, nx, ny, nz, boundary_config);
+                value += boundary::constraint_value(constraint_velocity_z, cell_indices, front_x, front_y, front_z, nx, ny, nz, boundary_config);
                 weight += 1.0f;
             }
             face = weight > 0.0f ? value / weight : 0.0f;
@@ -314,20 +251,21 @@ namespace kfs::cuda::operators::projection {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"find_pressure_anchor_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void compute_pressure_rhs(cudaStream_t stream, float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_pressure) {
+    void compute_pressure_rhs(cudaStream_t stream, float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* pressure_boundary_modes, const float* pressure_boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                              = field::centered_grid(nx, ny, nz, block);
-        const boundary::FlowBoundary boundary_config = boundary::make_flow_pressure_boundary(flow_types, flow_pressure);
-        compute_pressure_rhs_kernel<<<grid, block, 0, stream>>>(rhs, velocity_x, velocity_y, velocity_z, cell_indices, pressure_anchor, nx, ny, nz, h, dt, boundary_config);
+        const dim3 grid                                      = field::centered_grid(nx, ny, nz, block);
+        const boundary::ScalarBoundary3D pressure_boundary   = boundary::make_scalar_boundary(pressure_boundary_modes, pressure_boundary_values);
+        compute_pressure_rhs_kernel<<<grid, block, 0, stream>>>(rhs, velocity_x, velocity_y, velocity_z, cell_indices, pressure_anchor, nx, ny, nz, h, dt, pressure_boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_pressure_rhs_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void build_pressure_matrix(cudaStream_t stream, float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const std::uint32_t* flow_types) {
+    void build_pressure_matrix(cudaStream_t stream, float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const std::uint32_t* pressure_boundary_modes) {
         const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        constexpr unsigned block                     = 256u;
-        const unsigned grid                          = field::ceil_div_u32(count, block);
-        const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
-        build_pressure_matrix_kernel<<<grid, block, 0, stream>>>(values, row_offsets, column_indices, cell_indices, pressure_anchor, nx, ny, nz, boundary_config);
+        constexpr unsigned block                             = 256u;
+        const unsigned grid                                  = field::ceil_div_u32(count, block);
+        constexpr float zero_values[6]{};
+        const boundary::ScalarBoundary3D pressure_boundary   = boundary::make_scalar_boundary(pressure_boundary_modes, zero_values);
+        build_pressure_matrix_kernel<<<grid, block, 0, stream>>>(values, row_offsets, column_indices, cell_indices, pressure_anchor, nx, ny, nz, pressure_boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"build_pressure_matrix_kernel: "} + cudaGetErrorString(status)};
     }
 
@@ -341,10 +279,10 @@ namespace kfs::cuda::operators::projection {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"negate_scalar_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void project_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_velocity) {
+    void project_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* velocity_boundary_modes, const float* velocity_boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                              = field::staggered_grid(axis, nx, ny, nz, block);
-        const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(flow_types, flow_velocity);
+        const dim3 grid                                      = field::staggered_grid(axis, nx, ny, nz, block);
+        const boundary::VectorBoundary3D boundary_config     = boundary::make_vector_boundary(velocity_boundary_modes, velocity_boundary_values);
         if (axis == 0u) project_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 1u) project_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 2u) project_velocity_z_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);

@@ -12,9 +12,38 @@ import keyframe.operators.vorticity;
 
 namespace kfs::solver {
     export struct SmokeBoundary final {
-        boundary::FlowBoundary flow{};
-        boundary::ScalarBoundary density{};
-        boundary::ScalarBoundary temperature{};
+        boundary::VectorBoundary3D velocity{
+            .x_min = boundary::periodic_vector(),
+            .x_max = boundary::periodic_vector(),
+            .y_min = boundary::no_slip(),
+            .y_max = boundary::outflow(),
+            .z_min = boundary::periodic_vector(),
+            .z_max = boundary::periodic_vector(),
+        };
+        boundary::ScalarBoundary3D pressure{
+            .x_min = boundary::periodic_scalar(),
+            .x_max = boundary::periodic_scalar(),
+            .y_min = boundary::zero_gradient(),
+            .y_max = boundary::fixed_value(0.0f),
+            .z_min = boundary::periodic_scalar(),
+            .z_max = boundary::periodic_scalar(),
+        };
+        boundary::ScalarBoundary3D density{
+            .x_min = boundary::periodic_scalar(),
+            .x_max = boundary::periodic_scalar(),
+            .y_min = boundary::fixed_value(0.0f),
+            .y_max = boundary::fixed_value(0.0f),
+            .z_min = boundary::periodic_scalar(),
+            .z_max = boundary::periodic_scalar(),
+        };
+        boundary::ScalarBoundary3D temperature{
+            .x_min = boundary::periodic_scalar(),
+            .x_max = boundary::periodic_scalar(),
+            .y_min = boundary::fixed_value(0.0f),
+            .y_max = boundary::fixed_value(0.0f),
+            .z_min = boundary::periodic_scalar(),
+            .z_max = boundary::periodic_scalar(),
+        };
     };
 
     export struct Config final {
@@ -63,9 +92,10 @@ namespace kfs::solver {
             float density_emission_rate{0.0f};
             float temperature_emission_rate{0.0f};
             struct PackedSmokeBoundary final {
-                boundary::PackedFlowBoundary flow{};
-                boundary::PackedScalarBoundary density{};
-                boundary::PackedScalarBoundary temperature{};
+                boundary::PackedVectorBoundary3D velocity{};
+                boundary::PackedScalarBoundary3D pressure{};
+                boundary::PackedScalarBoundary3D density{};
+                boundary::PackedScalarBoundary3D temperature{};
             } boundary{};
             cudaStream_t stream{nullptr};
             std::uint32_t current_step{0u};

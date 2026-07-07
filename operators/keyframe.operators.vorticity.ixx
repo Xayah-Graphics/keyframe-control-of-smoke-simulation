@@ -8,7 +8,7 @@ import keyframe.boundary;
 
 export namespace kfs::operators {
     struct Vorticity final {
-        Vorticity(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, float vorticity_confinement, const boundary::PackedFlowBoundary& boundary);
+        Vorticity(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, float vorticity_confinement, const boundary::PackedVectorBoundary3D& vector_boundary);
         Vorticity(const Vorticity&)                = delete;
         Vorticity& operator=(const Vorticity&)     = delete;
         Vorticity(Vorticity&&) noexcept            = delete;
@@ -21,7 +21,7 @@ export namespace kfs::operators {
         std::array<std::int32_t, 3> resolution{0, 0, 0};
         float cell_size{0.0f};
         float confinement{0.0f};
-        boundary::PackedFlowBoundary flow_boundary{};
+        boundary::PackedVectorBoundary3D vector_boundary{};
         field::CenteredVectorField3D vorticity{{0, 0, 0}};
         field::ScalarField3D vorticity_magnitude{{0, 0, 0}};
     };

@@ -23,7 +23,8 @@ namespace kfs::solver {
             host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
             host.density_emission_rate       = config.density_emission_rate;
             host.temperature_emission_rate   = config.temperature_emission_rate;
-            host.boundary.flow               = boundary::pack(config.boundary.flow);
+            host.boundary.velocity           = boundary::pack(config.boundary.velocity);
+            host.boundary.pressure           = boundary::pack(config.boundary.pressure);
             host.boundary.density            = boundary::pack(config.boundary.density);
             host.boundary.temperature        = boundary::pack(config.boundary.temperature);
         }
@@ -91,8 +92,8 @@ namespace kfs::solver {
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
             this->emitter.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.emitter);
-            this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
-            this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.flow);
+            this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.velocity, this->host.boundary.pressure);
+            this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.velocity);
         } catch (...) {
             this->vorticity.reset();
             this->projection.reset();
@@ -115,7 +116,7 @@ namespace kfs::solver {
         try {
             auto& host                = this->host;
             auto& device              = this->device;
-            const auto& flow_boundary = host.boundary.flow;
+            const auto& velocity_boundary = host.boundary.velocity;
             const auto step_start     = std::chrono::steady_clock::now();
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
@@ -128,21 +129,21 @@ namespace kfs::solver {
                     (*this->vorticity)(device.force, device.centered_velocity, device.occupancy);
                     field::add(host.stream, device.velocity, device.force, delta_seconds);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        boundary::enforce_staggered_boundary(host.stream, axis, device.velocity, device.occupancy, device.solid_velocity, flow_boundary);
-                        if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.velocity);
+                        boundary::enforce(host.stream, axis, device.velocity, device.occupancy, device.solid_velocity, velocity_boundary);
+                        if (velocity_boundary.periodic[axis]) boundary::synchronize(host.stream, axis, device.velocity);
                     }
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        (*this->advection)(device.temp_velocity, axis, device.velocity, device.velocity, device.occupancy, delta_seconds, flow_boundary);
-                        boundary::enforce_staggered_boundary(host.stream, axis, device.temp_velocity, device.occupancy, device.solid_velocity, flow_boundary);
-                        if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity);
+                        (*this->advection)(device.temp_velocity, axis, device.velocity, device.velocity, device.occupancy, delta_seconds, velocity_boundary);
+                        boundary::enforce(host.stream, axis, device.temp_velocity, device.occupancy, device.solid_velocity, velocity_boundary);
+                        if (velocity_boundary.periodic[axis]) boundary::synchronize(host.stream, axis, device.temp_velocity);
                     }
                     (*this->projection)(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, delta_seconds);
                     (*this->emitter)(device.density_temp, device.density_data, host.density_emission_rate, delta_seconds);
                     (*this->emitter)(device.temperature_temp, device.temperature_data, host.temperature_emission_rate, delta_seconds);
-                    (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
+                    (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, velocity_boundary);
                     field::copy(host.stream, device.temperature_data, device.solid_temperature, device.occupancy, field::IndexSelection::marked);
-                    (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);
-                    boundary::boundary_fill_centered_scalar(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);
+                    (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, velocity_boundary);
+                    boundary::extrapolate(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);
                     field::copy(host.stream, device.density_data, device.density_temp);
                     ++this->host.current_step;
                 }

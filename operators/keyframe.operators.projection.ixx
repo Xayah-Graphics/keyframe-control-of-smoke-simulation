@@ -10,7 +10,7 @@ import keyframe.boundary;
 
 export namespace kfs::operators {
     struct Projection final {
-        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, std::int32_t pressure_iterations, const boundary::PackedFlowBoundary& boundary);
+        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, std::int32_t pressure_iterations, const boundary::PackedVectorBoundary3D& velocity_boundary, const boundary::PackedScalarBoundary3D& pressure_boundary);
         ~Projection() noexcept;
         Projection(const Projection&)                = delete;
         Projection& operator=(const Projection&)     = delete;
@@ -27,7 +27,8 @@ export namespace kfs::operators {
         std::array<std::int32_t, 3> resolution{0, 0, 0};
         float cell_size{0.0f};
         std::int32_t pressure_iterations{0};
-        boundary::PackedFlowBoundary flow_boundary{};
+        boundary::PackedVectorBoundary3D velocity_boundary{};
+        boundary::PackedScalarBoundary3D pressure_boundary{};
 
         cublasHandle_t cublas{nullptr};
         cusparseHandle_t cusparse{nullptr};

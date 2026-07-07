@@ -49,7 +49,7 @@ namespace kfs::operators {
 
     } // namespace
 
-    Projection::Projection(const cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const std::int32_t pressure_iterations, const boundary::PackedFlowBoundary& boundary) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_iterations{pressure_iterations}, flow_boundary{boundary} {
+    Projection::Projection(const cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const std::int32_t pressure_iterations, const boundary::PackedVectorBoundary3D& velocity_boundary, const boundary::PackedScalarBoundary3D& pressure_boundary) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_iterations{pressure_iterations}, velocity_boundary{velocity_boundary}, pressure_boundary{pressure_boundary} {
         try {
             this->initialize();
         } catch (...) {
@@ -82,12 +82,12 @@ namespace kfs::operators {
             const int z                                     = yz / ny;
             std::array<int, 7> row_columns{};
             int row_entry_count = 0;
-            add_pressure_neighbor(row_columns, row_entry_count, x - 1, y, z, this->flow_boundary.periodic[0], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x + 1, y, z, this->flow_boundary.periodic[0], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y - 1, z, this->flow_boundary.periodic[1], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y + 1, z, this->flow_boundary.periodic[1], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y, z - 1, this->flow_boundary.periodic[2], nx, ny, nz);
-            add_pressure_neighbor(row_columns, row_entry_count, x, y, z + 1, this->flow_boundary.periodic[2], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x - 1, y, z, this->pressure_boundary.periodic[0], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x + 1, y, z, this->pressure_boundary.periodic[0], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y - 1, z, this->pressure_boundary.periodic[1], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y + 1, z, this->pressure_boundary.periodic[1], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y, z - 1, this->pressure_boundary.periodic[2], nx, ny, nz);
+            add_pressure_neighbor(row_columns, row_entry_count, x, y, z + 1, this->pressure_boundary.periodic[2], nx, ny, nz);
             add_pressure_column(row_columns, row_entry_count, row);
             for (int left = 0; left < row_entry_count; ++left) {
                 for (int right = left + 1; right < row_entry_count; ++right) {
@@ -174,13 +174,14 @@ namespace kfs::operators {
         const int nx                    = this->resolution[0];
         const int ny                    = this->resolution[1];
         const int nz                    = this->resolution[2];
-        const std::uint32_t* flow_types = this->flow_boundary.types.data();
-        const float* flow_velocity      = this->flow_boundary.velocity.data();
-        const float* flow_pressure      = this->flow_boundary.pressure.data();
+        const std::uint32_t* velocity_boundary_modes = this->velocity_boundary.modes.data();
+        const float* velocity_boundary_values        = this->velocity_boundary.values.data();
+        const std::uint32_t* pressure_boundary_modes = this->pressure_boundary.modes.data();
+        const float* pressure_boundary_values        = this->pressure_boundary.values.data();
         cuda::operators::projection::reset_pressure_anchor(this->stream, this->pressure_anchor, cells);
         cuda::operators::projection::find_pressure_anchor(this->stream, this->pressure_anchor, cell_indices.data, cells64);
-        cuda::operators::projection::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], cell_indices.data, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_pressure);
-        cuda::operators::projection::build_pressure_matrix(this->stream, this->pressure_values, this->pressure_row_offsets, this->pressure_column_indices, cell_indices.data, this->pressure_anchor, nx, ny, nz, flow_types);
+        cuda::operators::projection::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], cell_indices.data, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, pressure_boundary_modes, pressure_boundary_values);
+        cuda::operators::projection::build_pressure_matrix(this->stream, this->pressure_values, this->pressure_row_offsets, this->pressure_column_indices, cell_indices.data, this->pressure_anchor, nx, ny, nz, pressure_boundary_modes);
         if (const cudaError_t status = cudaMemsetAsync(this->pressure, 0, bytes, this->stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync projection pressure: "} + cudaGetErrorString(status)};
         if (const cublasStatus_t status = cublasScopy(this->cublas, cells, this->pressure_rhs, 1, this->pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection rhs"};
         if (const cublasStatus_t status = cublasScopy(this->cublas, cells, this->pcg_r, 1, this->pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection pcg_p"};
@@ -202,9 +203,9 @@ namespace kfs::operators {
         }
 
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-            cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_indices.data, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_velocity);
-            boundary::enforce_staggered_boundary(this->stream, axis, working, cell_indices, constraint_velocity, this->flow_boundary);
-            if (this->flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(this->stream, axis, working);
+            cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_indices.data, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, velocity_boundary_modes, velocity_boundary_values);
+            boundary::enforce(this->stream, axis, working, cell_indices, constraint_velocity, this->velocity_boundary);
+            if (this->velocity_boundary.periodic[axis]) boundary::synchronize(this->stream, axis, working);
         }
         field::copy(this->stream, destination, working);
     }

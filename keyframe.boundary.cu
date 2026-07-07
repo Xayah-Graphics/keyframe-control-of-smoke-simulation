@@ -4,28 +4,28 @@
 #include <string>
 
 namespace kfs::cuda::boundary {
-    __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint32_t* cell_indices, const float* constraint_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_x_kernel(float* component, const std::uint32_t* cell_indices, const float* constraint_component, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i > nx || j >= ny || k >= nz) return;
 
-        auto& face = velocity_x[field::index(0u, i, j, k, nx, ny)];
+        auto& face_value = component[field::index(0u, i, j, k, nx, ny)];
         if (i == 0) {
-            if (const auto domain_face = boundary.x_minus; domain_face.type != flow_boundary_periodic) {
-                if (domain_face.type == flow_boundary_outflow && nx > 0)
-                    face = velocity_x[field::index(0u, 1, j, k, nx, ny)];
+            if (const VectorBoundaryFace3D face = boundary.x_min; face.mode != vector_boundary_periodic) {
+                if (face.mode == vector_boundary_zero_gradient && nx > 0)
+                    face_value = component[field::index(0u, 1, j, k, nx, ny)];
                 else
-                    face = domain_face.velocity_x;
+                    face_value = vector_face_value(face, 0u);
                 return;
             }
         }
         if (i == nx) {
-            if (const auto domain_face = boundary.x_plus; domain_face.type != flow_boundary_periodic) {
-                if (domain_face.type == flow_boundary_outflow && nx > 0)
-                    face = velocity_x[field::index(0u, nx - 1, j, k, nx, ny)];
+            if (const VectorBoundaryFace3D face = boundary.x_max; face.mode != vector_boundary_periodic) {
+                if (face.mode == vector_boundary_zero_gradient && nx > 0)
+                    face_value = component[field::index(0u, nx - 1, j, k, nx, ny)];
                 else
-                    face = domain_face.velocity_x;
+                    face_value = vector_face_value(face, 0u);
                 return;
             }
         }
@@ -37,145 +37,145 @@ namespace kfs::cuda::boundary {
         int right_z               = k;
         const bool has_left       = resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary);
         const bool has_right      = resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary);
-        const bool left_occupied  = has_left && cell_indices[field::index(left_x, left_y, left_z, nx, ny)] != 0u;
-        const bool right_occupied = has_right && cell_indices[field::index(right_x, right_y, right_z, nx, ny)] != 0u;
-        if (!left_occupied && !right_occupied) return;
+        const bool left_marked    = has_left && cell_indices[field::index(left_x, left_y, left_z, nx, ny)] != 0u;
+        const bool right_marked   = has_right && cell_indices[field::index(right_x, right_y, right_z, nx, ny)] != 0u;
+        if (!left_marked && !right_marked) return;
 
         float value  = 0.0f;
         float weight = 0.0f;
-        if (left_occupied) {
-            value += constraint_velocity_value(constraint_velocity_x, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary);
+        if (left_marked) {
+            value += constraint_value(constraint_component, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
-        if (right_occupied) {
-            value += constraint_velocity_value(constraint_velocity_x, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary);
+        if (right_marked) {
+            value += constraint_value(constraint_component, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
-        face = weight > 0.0f ? value / weight : 0.0f;
+        face_value = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void enforce_velocity_y_boundaries_kernel(float* velocity_y, const std::uint32_t* cell_indices, const float* constraint_velocity_y, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_y_kernel(float* component, const std::uint32_t* cell_indices, const float* constraint_component, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j > ny || k >= nz) return;
 
-        auto& face = velocity_y[field::index(1u, i, j, k, nx, ny)];
+        auto& face_value = component[field::index(1u, i, j, k, nx, ny)];
         if (j == 0) {
-            if (const auto domain_face = boundary.y_minus; domain_face.type != flow_boundary_periodic) {
-                if (domain_face.type == flow_boundary_outflow && ny > 0)
-                    face = velocity_y[field::index(1u, i, 1, k, nx, ny)];
+            if (const VectorBoundaryFace3D face = boundary.y_min; face.mode != vector_boundary_periodic) {
+                if (face.mode == vector_boundary_zero_gradient && ny > 0)
+                    face_value = component[field::index(1u, i, 1, k, nx, ny)];
                 else
-                    face = domain_face.velocity_y;
+                    face_value = vector_face_value(face, 1u);
                 return;
             }
         }
         if (j == ny) {
-            if (const auto domain_face = boundary.y_plus; domain_face.type != flow_boundary_periodic) {
-                if (domain_face.type == flow_boundary_outflow && ny > 0)
-                    face = velocity_y[field::index(1u, i, ny - 1, k, nx, ny)];
+            if (const VectorBoundaryFace3D face = boundary.y_max; face.mode != vector_boundary_periodic) {
+                if (face.mode == vector_boundary_zero_gradient && ny > 0)
+                    face_value = component[field::index(1u, i, ny - 1, k, nx, ny)];
                 else
-                    face = domain_face.velocity_y;
+                    face_value = vector_face_value(face, 1u);
                 return;
             }
         }
-        int down_x               = i;
-        int down_y               = j - 1;
-        int down_z               = k;
-        int up_x                 = i;
-        int up_y                 = j;
-        int up_z                 = k;
-        const bool has_down      = resolve_cell_coordinates(down_x, down_y, down_z, nx, ny, nz, boundary);
-        const bool has_up        = resolve_cell_coordinates(up_x, up_y, up_z, nx, ny, nz, boundary);
-        const bool down_occupied = has_down && cell_indices[field::index(down_x, down_y, down_z, nx, ny)] != 0u;
-        const bool up_occupied   = has_up && cell_indices[field::index(up_x, up_y, up_z, nx, ny)] != 0u;
-        if (!down_occupied && !up_occupied) return;
+        int min_x              = i;
+        int min_y              = j - 1;
+        int min_z              = k;
+        int max_x              = i;
+        int max_y              = j;
+        int max_z              = k;
+        const bool has_min     = resolve_cell_coordinates(min_x, min_y, min_z, nx, ny, nz, boundary);
+        const bool has_max     = resolve_cell_coordinates(max_x, max_y, max_z, nx, ny, nz, boundary);
+        const bool min_marked  = has_min && cell_indices[field::index(min_x, min_y, min_z, nx, ny)] != 0u;
+        const bool max_marked  = has_max && cell_indices[field::index(max_x, max_y, max_z, nx, ny)] != 0u;
+        if (!min_marked && !max_marked) return;
 
         float value  = 0.0f;
         float weight = 0.0f;
-        if (down_occupied) {
-            value += constraint_velocity_value(constraint_velocity_y, cell_indices, down_x, down_y, down_z, nx, ny, nz, boundary);
+        if (min_marked) {
+            value += constraint_value(constraint_component, cell_indices, min_x, min_y, min_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
-        if (up_occupied) {
-            value += constraint_velocity_value(constraint_velocity_y, cell_indices, up_x, up_y, up_z, nx, ny, nz, boundary);
+        if (max_marked) {
+            value += constraint_value(constraint_component, cell_indices, max_x, max_y, max_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
-        face = weight > 0.0f ? value / weight : 0.0f;
+        face_value = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void enforce_velocity_z_boundaries_kernel(float* velocity_z, const std::uint32_t* cell_indices, const float* constraint_velocity_z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_z_kernel(float* component, const std::uint32_t* cell_indices, const float* constraint_component, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j >= ny || k > nz) return;
 
-        auto& face = velocity_z[field::index(2u, i, j, k, nx, ny)];
+        auto& face_value = component[field::index(2u, i, j, k, nx, ny)];
         if (k == 0) {
-            if (const auto domain_face = boundary.z_minus; domain_face.type != flow_boundary_periodic) {
-                if (domain_face.type == flow_boundary_outflow && nz > 0)
-                    face = velocity_z[field::index(2u, i, j, 1, nx, ny)];
+            if (const VectorBoundaryFace3D face = boundary.z_min; face.mode != vector_boundary_periodic) {
+                if (face.mode == vector_boundary_zero_gradient && nz > 0)
+                    face_value = component[field::index(2u, i, j, 1, nx, ny)];
                 else
-                    face = domain_face.velocity_z;
+                    face_value = vector_face_value(face, 2u);
                 return;
             }
         }
         if (k == nz) {
-            if (const auto domain_face = boundary.z_plus; domain_face.type != flow_boundary_periodic) {
-                if (domain_face.type == flow_boundary_outflow && nz > 0)
-                    face = velocity_z[field::index(2u, i, j, nz - 1, nx, ny)];
+            if (const VectorBoundaryFace3D face = boundary.z_max; face.mode != vector_boundary_periodic) {
+                if (face.mode == vector_boundary_zero_gradient && nz > 0)
+                    face_value = component[field::index(2u, i, j, nz - 1, nx, ny)];
                 else
-                    face = domain_face.velocity_z;
+                    face_value = vector_face_value(face, 2u);
                 return;
             }
         }
-        int back_x                = i;
-        int back_y                = j;
-        int back_z                = k - 1;
-        int front_x               = i;
-        int front_y               = j;
-        int front_z               = k;
-        const bool has_back       = resolve_cell_coordinates(back_x, back_y, back_z, nx, ny, nz, boundary);
-        const bool has_front      = resolve_cell_coordinates(front_x, front_y, front_z, nx, ny, nz, boundary);
-        const bool back_occupied  = has_back && cell_indices[field::index(back_x, back_y, back_z, nx, ny)] != 0u;
-        const bool front_occupied = has_front && cell_indices[field::index(front_x, front_y, front_z, nx, ny)] != 0u;
-        if (!back_occupied && !front_occupied) return;
+        int min_x              = i;
+        int min_y              = j;
+        int min_z              = k - 1;
+        int max_x              = i;
+        int max_y              = j;
+        int max_z              = k;
+        const bool has_min     = resolve_cell_coordinates(min_x, min_y, min_z, nx, ny, nz, boundary);
+        const bool has_max     = resolve_cell_coordinates(max_x, max_y, max_z, nx, ny, nz, boundary);
+        const bool min_marked  = has_min && cell_indices[field::index(min_x, min_y, min_z, nx, ny)] != 0u;
+        const bool max_marked  = has_max && cell_indices[field::index(max_x, max_y, max_z, nx, ny)] != 0u;
+        if (!min_marked && !max_marked) return;
 
         float value  = 0.0f;
         float weight = 0.0f;
-        if (back_occupied) {
-            value += constraint_velocity_value(constraint_velocity_z, cell_indices, back_x, back_y, back_z, nx, ny, nz, boundary);
+        if (min_marked) {
+            value += constraint_value(constraint_component, cell_indices, min_x, min_y, min_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
-        if (front_occupied) {
-            value += constraint_velocity_value(constraint_velocity_z, cell_indices, front_x, front_y, front_z, nx, ny, nz, boundary);
+        if (max_marked) {
+            value += constraint_value(constraint_component, cell_indices, max_x, max_y, max_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
-        face = weight > 0.0f ? value / weight : 0.0f;
+        face_value = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void sync_periodic_velocity_x_kernel(float* velocity_x, const int nx, const int ny, const int nz) {
+    __global__ void synchronize_x_kernel(float* component, const int nx, const int ny, const int nz) {
         const int j = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int k = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         if (j >= ny || k >= nz) return;
-        velocity_x[field::index(0u, nx, j, k, nx, ny)] = velocity_x[field::index(0u, 0, j, k, nx, ny)];
+        component[field::index(0u, nx, j, k, nx, ny)] = component[field::index(0u, 0, j, k, nx, ny)];
     }
 
-    __global__ void sync_periodic_velocity_y_kernel(float* velocity_y, const int nx, const int ny, const int nz) {
+    __global__ void synchronize_y_kernel(float* component, const int nx, const int ny, const int nz) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int k = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         if (i >= nx || k >= nz) return;
-        velocity_y[field::index(1u, i, ny, k, nx, ny)] = velocity_y[field::index(1u, i, 0, k, nx, ny)];
+        component[field::index(1u, i, ny, k, nx, ny)] = component[field::index(1u, i, 0, k, nx, ny)];
     }
 
-    __global__ void sync_periodic_velocity_z_kernel(float* velocity_z, const int nx, const int ny, const int nz) {
+    __global__ void synchronize_z_kernel(float* component, const int nx, const int ny, const int nz) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         if (i >= nx || j >= ny) return;
-        velocity_z[field::index(2u, i, j, nz, nx, ny)] = velocity_z[field::index(2u, i, j, 0, nx, ny)];
+        component[field::index(2u, i, j, nz, nx, ny)] = component[field::index(2u, i, j, 0, nx, ny)];
     }
 
-    __global__ void boundary_fill_centered_scalar_kernel(float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const ScalarBoundary boundary) {
+    __global__ void extrapolate_kernel(float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const ScalarBoundary3D boundary) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -204,7 +204,7 @@ namespace kfs::cuda::boundary {
                         int next_x = x + dx;
                         int next_y = y + dy;
                         int next_z = z + dz;
-                        if (!resolve_scalar_cell_coordinates(next_x, next_y, next_z, nx, ny, nz, boundary)) continue;
+                        if (!resolve_cell_coordinates(next_x, next_y, next_z, nx, ny, nz, boundary)) continue;
                         const auto neighbor_index = field::index(next_x, next_y, next_z, nx, ny);
                         if (cell_indices[neighbor_index] != 0u) continue;
                         const int distance2 = dx * dx + dy * dy + dz * dz;
@@ -224,30 +224,30 @@ namespace kfs::cuda::boundary {
         destination[index] = 0.0f;
     }
 
-    void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
+    void enforce(cudaStream_t stream, const std::uint32_t axis, float* component, const std::uint32_t* cell_indices, const float* constraint_component, const int nx, const int ny, const int nz, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid             = field::staggered_grid(axis, nx, ny, nz, block);
-        const FlowBoundary boundary = make_flow_velocity_boundary(flow_types, flow_velocity);
-        if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, constraint_velocity_component, nx, ny, nz, boundary);
-        if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, constraint_velocity_component, nx, ny, nz, boundary);
-        if (axis == 2u) enforce_velocity_z_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, constraint_velocity_component, nx, ny, nz, boundary);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"enforce_staggered_boundary_kernel: "} + cudaGetErrorString(status)};
+        const dim3 grid               = field::staggered_grid(axis, nx, ny, nz, block);
+        const VectorBoundary3D boundary = make_vector_boundary(boundary_modes, boundary_values);
+        if (axis == 0u) enforce_x_kernel<<<grid, block, 0, stream>>>(component, cell_indices, constraint_component, nx, ny, nz, boundary);
+        if (axis == 1u) enforce_y_kernel<<<grid, block, 0, stream>>>(component, cell_indices, constraint_component, nx, ny, nz, boundary);
+        if (axis == 2u) enforce_z_kernel<<<grid, block, 0, stream>>>(component, cell_indices, constraint_component, nx, ny, nz, boundary);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary enforce kernel: "} + cudaGetErrorString(status)};
     }
 
-    void sync_periodic_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const int nx, const int ny, const int nz) {
+    void synchronize(cudaStream_t stream, const std::uint32_t axis, float* component, const int nx, const int ny, const int nz) {
         constexpr dim3 block{8u, 8u, 1u};
         const dim3 grid = axis == 0u ? dim3{field::ceil_div_u32(static_cast<std::uint64_t>(ny), block.x), field::ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u} : axis == 1u ? dim3{field::ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), field::ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u} : dim3{field::ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), field::ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), 1u};
-        if (axis == 0u) sync_periodic_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
-        if (axis == 1u) sync_periodic_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
-        if (axis == 2u) sync_periodic_velocity_z_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"sync_periodic_staggered_component_kernel: "} + cudaGetErrorString(status)};
+        if (axis == 0u) synchronize_x_kernel<<<grid, block, 0, stream>>>(component, nx, ny, nz);
+        if (axis == 1u) synchronize_y_kernel<<<grid, block, 0, stream>>>(component, nx, ny, nz);
+        if (axis == 2u) synchronize_z_kernel<<<grid, block, 0, stream>>>(component, nx, ny, nz);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary synchronize kernel: "} + cudaGetErrorString(status)};
     }
 
-    void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
+    void extrapolate(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid = field::centered_grid(nx, ny, nz, block);
-        const ScalarBoundary boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
-        boundary_fill_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, cell_indices, nx, ny, nz, boundary);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary_fill_centered_scalar_kernel: "} + cudaGetErrorString(status)};
+        const dim3 grid                 = field::centered_grid(nx, ny, nz, block);
+        const ScalarBoundary3D boundary = make_scalar_boundary(boundary_modes, boundary_values);
+        extrapolate_kernel<<<grid, block, 0, stream>>>(destination, source, cell_indices, nx, ny, nz, boundary);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary extrapolate kernel: "} + cudaGetErrorString(status)};
     }
 } // namespace kfs::cuda::boundary
