@@ -23,18 +23,22 @@ namespace kfs::solver {
             if (!std::isfinite(config.ambient_temperature)) throw std::runtime_error{"Keyframe smoke ambient_temperature must be finite"};
             if (!std::isfinite(config.buoyancy_density_factor)) throw std::runtime_error{"Keyframe smoke buoyancy_density_factor must be finite"};
             if (!std::isfinite(config.buoyancy_temperature_factor)) throw std::runtime_error{"Keyframe smoke buoyancy_temperature_factor must be finite"};
+            if (!std::isfinite(config.density_emission_rate) || config.density_emission_rate < 0.0f) throw std::runtime_error{"Keyframe smoke density_emission_rate must be finite and non-negative"};
+            if (!std::isfinite(config.temperature_emission_rate) || config.temperature_emission_rate < 0.0f) throw std::runtime_error{"Keyframe smoke temperature_emission_rate must be finite and non-negative"};
 
             const std::uint64_t cell_count = static_cast<std::uint64_t>(config.resolution[0]) * static_cast<std::uint64_t>(config.resolution[1]) * static_cast<std::uint64_t>(config.resolution[2]);
             if (cell_count == 0 || cell_count > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke cell count exceeds pressure solver int range");
         }
 
         void initialize_host(Solver::HostData& host, const Config& config) {
-            host.nx                  = static_cast<std::int32_t>(config.resolution[0]);
-            host.ny                  = static_cast<std::int32_t>(config.resolution[1]);
-            host.nz                  = static_cast<std::int32_t>(config.resolution[2]);
-            host.cell_size           = config.cell_size;
-            host.ambient_temperature = config.ambient_temperature;
-            host.boundary            = boundary::pack(config.boundary);
+            host.nx                        = static_cast<std::int32_t>(config.resolution[0]);
+            host.ny                        = static_cast<std::int32_t>(config.resolution[1]);
+            host.nz                        = static_cast<std::int32_t>(config.resolution[2]);
+            host.cell_size                 = config.cell_size;
+            host.ambient_temperature       = config.ambient_temperature;
+            host.density_emission_rate     = config.density_emission_rate;
+            host.temperature_emission_rate = config.temperature_emission_rate;
+            host.boundary                  = boundary::pack(config.boundary);
         }
 
         void initialize_field_buffers(const Solver::HostData& host, Solver::DeviceData& device) {
@@ -156,7 +160,8 @@ namespace kfs::solver {
                         if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.temp_velocity);
                     }
                     (*this->projection)(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, delta_seconds);
-                    (*this->emitter)(device.density_temp, device.density_data, device.temperature_temp, device.temperature_data, delta_seconds);
+                    (*this->emitter)(device.density_temp, device.density_data, host.density_emission_rate, delta_seconds);
+                    (*this->emitter)(device.temperature_temp, device.temperature_data, host.temperature_emission_rate, delta_seconds);
                     (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
                     this->solid->apply_scalar(device.temperature_data, device.solid_temperature, device.occupancy);
                     (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);

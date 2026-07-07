@@ -13,8 +13,6 @@ export namespace kfs::operators {
                 .center = {0.6f, 0.216f, 0.6f},
                 .radius = {0.156f, 0.144f, 0.156f},
             };
-            float density_rate{18.0f};
-            float temperature_rate{36.0f};
             float falloff{2.2f};
         };
 
@@ -24,7 +22,7 @@ export namespace kfs::operators {
         Emitter(Emitter&&) noexcept            = delete;
         Emitter& operator=(Emitter&&) noexcept = delete;
 
-        void operator()(field::ScalarField3D& density_destination, const field::ScalarField3D& density_current, field::ScalarField3D& temperature_destination, const field::ScalarField3D& temperature_current, float delta_seconds) const;
+        void operator()(field::ScalarField3D& destination, const field::ScalarField3D& current, float rate, float delta_seconds) const;
 
     private:
         cudaStream_t stream{nullptr};

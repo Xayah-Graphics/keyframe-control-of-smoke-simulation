@@ -23,6 +23,8 @@ namespace kfs::solver {
         float vorticity_confinement{0.22f};
         operators::Advection::Scheme advection_scheme{operators::Advection::Scheme::monotonic_cubic};
         operators::Emitter::Source emitter{};
+        float density_emission_rate{18.0f};
+        float temperature_emission_rate{36.0f};
         boundary::DomainBoundary boundary{};
     };
 
@@ -52,6 +54,8 @@ namespace kfs::solver {
             std::int32_t nz{0};
             float cell_size{0.0f};
             float ambient_temperature{0.0f};
+            float density_emission_rate{0.0f};
+            float temperature_emission_rate{0.0f};
             boundary::PackedDomainBoundary boundary{};
             cudaStream_t stream{nullptr};
             std::uint32_t current_step{0u};
