@@ -87,9 +87,6 @@ target_sources(
         operators/keyframe.operators.emitter.cpp
         operators/keyframe.operators.emitter.cu
         operators/keyframe.operators.emitter.h
-        operators/keyframe.operators.masked_scalar_assignment.cpp
-        operators/keyframe.operators.masked_scalar_assignment.cu
-        operators/keyframe.operators.masked_scalar_assignment.h
         operators/keyframe.operators.projection.cpp
         operators/keyframe.operators.projection.cu
         operators/keyframe.operators.projection.h
@@ -108,7 +105,6 @@ target_sources(
         operators/keyframe.operators.advection.ixx
         operators/keyframe.operators.scalar_force.ixx
         operators/keyframe.operators.emitter.ixx
-        operators/keyframe.operators.masked_scalar_assignment.ixx
         operators/keyframe.operators.projection.ixx
         operators/keyframe.operators.vorticity.ixx
         keyframe.solver.ixx

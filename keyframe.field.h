@@ -20,6 +20,7 @@ namespace kfs::cuda {
 
     namespace field {
         void fill(cudaStream_t stream, float* values, std::uint64_t count, float value);
+        void copy_masked(cudaStream_t stream, float* destination, const float* source, const std::uint8_t* mask, std::uint64_t count);
         void add_scaled(cudaStream_t stream, float* destination, const float* current, const float* source, std::uint64_t count, float scale);
         void center_staggered(cudaStream_t stream, float* cx, float* cy, float* cz, const float* sx, const float* sy, const float* sz, std::array<std::int32_t, 3> resolution);
         void add_centered_to_staggered(cudaStream_t stream, float* destination, const float* source, std::uint32_t axis, std::array<std::int32_t, 3> resolution, float scale);

@@ -48,6 +48,13 @@ namespace kfs::cuda::field {
             values[index] = value;
         }
 
+        __global__ void copy_masked_kernel(float* destination, const float* source, const std::uint8_t* mask, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            if (mask[index] == 0u) return;
+            destination[index] = source[index];
+        }
+
         __global__ void add_scaled_kernel(float* destination, const float* current, const float* source, const float scale, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
@@ -126,6 +133,11 @@ namespace kfs::cuda::field {
     void fill(cudaStream_t stream, float* const values, const std::uint64_t count, const float value) {
         fill_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(values, value, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void copy_masked(cudaStream_t stream, float* const destination, const float* const source, const std::uint8_t* const mask, const std::uint64_t count) {
+        copy_masked_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, mask, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"copy_masked_kernel: "} + cudaGetErrorString(status)};
     }
 
     void add_scaled(cudaStream_t stream, float* const destination, const float* const current, const float* const source, const std::uint64_t count, const float scale) {

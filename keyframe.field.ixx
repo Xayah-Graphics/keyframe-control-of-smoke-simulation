@@ -67,6 +67,7 @@ export namespace kfs::field {
     void fill(cudaStream_t stream, CenteredVectorField3D& values, float value);
     void fill(cudaStream_t stream, StaggeredVectorField3D& values, float value);
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source);
+    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const std::uint8_t* mask);
     void copy(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source);
     void copy(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source);
     void copy_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source);

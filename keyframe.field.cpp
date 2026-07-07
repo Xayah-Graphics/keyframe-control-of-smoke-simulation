@@ -103,6 +103,15 @@ namespace kfs::field {
         copy_device_buffer(stream, destination.data, source.data, destination.bytes(), "scalar copy");
     }
 
+    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const std::uint8_t* mask) {
+        if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
+        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        if (destination.count() == 0u || destination.data == nullptr) throw std::runtime_error{"destination field is empty"};
+        if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
+        if (mask == nullptr) throw std::runtime_error{"field mask must not be null"};
+        cuda::field::copy_masked(stream, destination.data, source.data, mask, destination.count());
+    }
+
     void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, const float scale) {
         if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
         if (destination.resolution != current.resolution || destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};

@@ -9,7 +9,6 @@ export import keyframe.operators.advection;
 export import keyframe.operators.emitter;
 import keyframe.operators.scalar_force;
 import keyframe.operators.projection;
-import keyframe.operators.masked_scalar_assignment;
 import keyframe.operators.vorticity;
 
 namespace kfs::solver {
@@ -82,7 +81,6 @@ namespace kfs::solver {
         std::optional<operators::Emitter> emitter{};
         std::optional<operators::ScalarForce> scalar_force{};
         std::optional<operators::Projection> projection{};
-        std::optional<operators::MaskedScalarAssignment> masked_scalar_assignment{};
         std::optional<operators::Vorticity> vorticity{};
     };
 } // namespace kfs::solver
