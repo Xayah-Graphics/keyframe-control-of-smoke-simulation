@@ -78,7 +78,7 @@ export namespace kfs::boundary {
     void validate(const DomainBoundary& boundary);
     [[nodiscard]] PackedDomainBoundary pack(const DomainBoundary& boundary);
 
-    void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values, const std::uint8_t* occupancy, const field::CenteredVectorField3D& solid_velocity, const PackedFlowBoundary& boundary);
+    void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values, const field::IndexedField3D& cell_indices, const field::CenteredVectorField3D& solid_velocity, const PackedFlowBoundary& boundary);
     void sync_periodic_staggered_component(cudaStream_t stream, std::uint32_t axis, field::StaggeredVectorField3D& values);
-    void boundary_fill_centered_scalar(cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const std::uint8_t* occupancy, const PackedScalarBoundary& boundary);
+    void boundary_fill_centered_scalar(cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const field::IndexedField3D& cell_indices, const PackedScalarBoundary& boundary);
 } // namespace kfs::boundary

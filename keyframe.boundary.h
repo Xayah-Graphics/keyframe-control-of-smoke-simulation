@@ -167,10 +167,9 @@ namespace kfs::cuda::boundary {
         return cell_in_bounds(x, y, z, nx, ny, nz);
     }
 
-    __device__ inline bool cell_is_masked(const std::uint8_t* cell_mask, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
-        if (cell_mask == nullptr) return false;
+    __device__ inline bool cell_is_marked(const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return true;
-        return cell_mask[index_3d(x, y, z, nx, ny)] != 0;
+        return cell_indices[index_3d(x, y, z, nx, ny)] != 0u;
     }
 
     __device__ inline float load_flow_cell(const float* field, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
@@ -244,16 +243,16 @@ namespace kfs::cuda::boundary {
         return field[index_3d(x, y, z, nx, ny)];
     }
 
-    __device__ inline float constraint_velocity_value(const float* constraint_velocity, const std::uint8_t* cell_mask, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
-        if (constraint_velocity == nullptr || cell_mask == nullptr) return 0.0f;
+    __device__ inline float constraint_velocity_value(const float* constraint_velocity, const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+        if (constraint_velocity == nullptr) return 0.0f;
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return 0.0f;
-        if (cell_mask[index_3d(x, y, z, nx, ny)] == 0) return 0.0f;
+        if (cell_indices[index_3d(x, y, z, nx, ny)] == 0u) return 0.0f;
         return constraint_velocity[index_3d(x, y, z, nx, ny)];
     }
 
-    void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, float* velocity_component, const std::uint8_t* occupancy, const float* solid_velocity_component, int nx, int ny, int nz, const std::uint32_t* flow_types, const float* flow_velocity);
+    void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* solid_velocity_component, int nx, int ny, int nz, const std::uint32_t* flow_types, const float* flow_velocity);
     void sync_periodic_staggered_component(cudaStream_t stream, std::uint32_t axis, float* velocity_component, int nx, int ny, int nz);
-    void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint8_t* occupancy, int nx, int ny, int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values);
+    void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* cell_indices, int nx, int ny, int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values);
 } // namespace kfs::cuda::boundary
 
 #endif // KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_BOUNDARY_H

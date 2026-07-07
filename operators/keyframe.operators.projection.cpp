@@ -175,8 +175,8 @@ namespace kfs::operators {
         this->spmv_buffer_size = 0;
     }
 
-    void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const std::uint8_t* cell_mask, const float delta_seconds) {
-        if (destination.resolution != this->resolution || working.resolution != this->resolution || constraint_velocity.resolution != this->resolution) throw std::runtime_error{"Projection field resolution mismatch"};
+    void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const float delta_seconds) {
+        if (destination.resolution != this->resolution || working.resolution != this->resolution || constraint_velocity.resolution != this->resolution || cell_indices.resolution != this->resolution) throw std::runtime_error{"Projection field resolution mismatch"};
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
             if (destination.count(axis) == 0u || destination.data[axis] == nullptr) throw std::runtime_error{"destination field component is empty"};
             if (working.count(axis) == 0u || working.data[axis] == nullptr) throw std::runtime_error{"working field component is empty"};
@@ -184,7 +184,7 @@ namespace kfs::operators {
         if (constraint_velocity.count() == 0u) throw std::runtime_error{"Projection constraint_velocity field is empty"};
         for (std::uint32_t axis = 0u; axis < 3u; ++axis)
             if (constraint_velocity.data[axis] == nullptr) throw std::runtime_error{"Projection constraint_velocity field component is empty"};
-        if (cell_mask == nullptr) throw std::runtime_error{"Projection cell_mask must not be null"};
+        if (cell_indices.count() == 0u || cell_indices.data == nullptr) throw std::runtime_error{"Projection cell_indices field is empty"};
         if (!std::isfinite(delta_seconds) || delta_seconds <= 0.0f) throw std::runtime_error{"Projection delta_seconds must be positive"};
 
         const std::uint64_t cells64     = cell_count(this->resolution);
@@ -197,9 +197,9 @@ namespace kfs::operators {
         const float* flow_velocity      = this->flow_boundary.velocity.data();
         const float* flow_pressure      = this->flow_boundary.pressure.data();
         cuda::operators::projection::reset_pressure_anchor(this->stream, this->pressure_anchor, cells);
-        cuda::operators::projection::find_pressure_anchor(this->stream, this->pressure_anchor, cell_mask, cells64);
-        cuda::operators::projection::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], cell_mask, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_pressure);
-        cuda::operators::projection::build_pressure_matrix(this->stream, this->pressure_values, this->pressure_row_offsets, this->pressure_column_indices, cell_mask, this->pressure_anchor, nx, ny, nz, flow_types);
+        cuda::operators::projection::find_pressure_anchor(this->stream, this->pressure_anchor, cell_indices.data, cells64);
+        cuda::operators::projection::compute_pressure_rhs(this->stream, this->pressure_rhs, working.data[0], working.data[1], working.data[2], cell_indices.data, this->pressure_anchor, nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_pressure);
+        cuda::operators::projection::build_pressure_matrix(this->stream, this->pressure_values, this->pressure_row_offsets, this->pressure_column_indices, cell_indices.data, this->pressure_anchor, nx, ny, nz, flow_types);
         if (const cudaError_t status = cudaMemsetAsync(this->pressure, 0, bytes, this->stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync projection pressure: "} + cudaGetErrorString(status)};
         if (const cublasStatus_t status = cublasScopy(this->cublas, cells, this->pressure_rhs, 1, this->pcg_r, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection rhs"};
         if (const cublasStatus_t status = cublasScopy(this->cublas, cells, this->pcg_r, 1, this->pcg_p, 1); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{"cublasScopy projection pcg_p"};
@@ -221,8 +221,8 @@ namespace kfs::operators {
         }
 
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
-            cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_mask, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_velocity);
-            boundary::enforce_staggered_boundary(this->stream, axis, working, cell_mask, constraint_velocity, this->flow_boundary);
+            cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_indices.data, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, flow_types, flow_velocity);
+            boundary::enforce_staggered_boundary(this->stream, axis, working, cell_indices, constraint_velocity, this->flow_boundary);
             if (this->flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(this->stream, axis, working);
             field::copy_component(this->stream, destination, axis, working);
         }

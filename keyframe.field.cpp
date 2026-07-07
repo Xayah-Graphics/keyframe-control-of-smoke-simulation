@@ -95,6 +95,48 @@ namespace kfs::field {
         this->storage_kind = ScalarFieldStorageKind::external;
     }
 
+    IndexedField3D::IndexedField3D(const std::array<std::int32_t, 3> resolution) : resolution{} {
+        this->resize(resolution);
+    }
+
+    IndexedField3D::~IndexedField3D() noexcept {
+        cuda::free_device_buffers(this->data);
+        this->resolution = {};
+    }
+
+    IndexedField3D::IndexedField3D(IndexedField3D&& other) noexcept : resolution{std::exchange(other.resolution, std::array<std::int32_t, 3>{})}, data{std::exchange(other.data, nullptr)} {}
+
+    IndexedField3D& IndexedField3D::operator=(IndexedField3D&& other) noexcept {
+        if (this == &other) return *this;
+        cuda::free_device_buffers(this->data);
+        this->resolution = std::exchange(other.resolution, std::array<std::int32_t, 3>{});
+        this->data       = std::exchange(other.data, nullptr);
+        return *this;
+    }
+
+    [[nodiscard]] std::uint64_t IndexedField3D::count() const {
+        return cell_element_count(this->resolution);
+    }
+
+    [[nodiscard]] std::size_t IndexedField3D::bytes() const {
+        return cell_element_count(this->resolution) * sizeof(std::uint32_t);
+    }
+
+    void IndexedField3D::resize(const std::array<std::int32_t, 3> resolution) {
+        if (this->resolution == resolution) return;
+        if (resolution[0] == 0 && resolution[1] == 0 && resolution[2] == 0) {
+            cuda::free_device_buffers(this->data);
+            this->resolution = {};
+            return;
+        }
+
+        std::uint32_t* next = nullptr;
+        if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next), cell_element_count(resolution) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc indexed field: "} + cudaGetErrorString(status)};
+        cuda::free_device_buffers(this->data);
+        this->data       = next;
+        this->resolution = resolution;
+    }
+
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source) {
         if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
         if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
@@ -103,13 +145,21 @@ namespace kfs::field {
         copy_device_buffer(stream, destination.data, source.data, destination.bytes(), "scalar copy");
     }
 
-    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const std::uint8_t* mask) {
+    void copy(cudaStream_t stream, IndexedField3D& destination, const IndexedField3D& source) {
         if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
         if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
         if (destination.count() == 0u || destination.data == nullptr) throw std::runtime_error{"destination field is empty"};
         if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
-        if (mask == nullptr) throw std::runtime_error{"field mask must not be null"};
-        cuda::field::copy_masked(stream, destination.data, source.data, mask, destination.count());
+        if (const cudaError_t status = cudaMemcpyAsync(destination.data, source.data, destination.bytes(), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync indexed copy: "} + cudaGetErrorString(status)};
+    }
+
+    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices) {
+        if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
+        if (destination.resolution != source.resolution || destination.resolution != indices.resolution) throw std::runtime_error{"field resolution mismatch"};
+        if (destination.count() == 0u || destination.data == nullptr) throw std::runtime_error{"destination field is empty"};
+        if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
+        if (indices.count() == 0u || indices.data == nullptr) throw std::runtime_error{"indices field is empty"};
+        cuda::field::copy_masked(stream, destination.data, source.data, indices.data, destination.count());
     }
 
     void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, const float scale) {
@@ -121,19 +171,25 @@ namespace kfs::field {
         cuda::field::add_scaled(stream, destination.data, current.data, source.data, destination.count(), scale);
     }
 
-    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const std::uint8_t* mask, const float scale, const float bias) {
+    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const IndexedField3D& indices, const float scale, const float bias) {
         if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
         if (axis >= 3u) throw std::runtime_error{"invalid axis"};
-        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        if (destination.resolution != source.resolution || destination.resolution != indices.resolution) throw std::runtime_error{"field resolution mismatch"};
         if (destination.count() == 0u || destination.data[axis] == nullptr) throw std::runtime_error{"destination field component is empty"};
         if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
-        if (mask == nullptr) throw std::runtime_error{"field mask must not be null"};
+        if (indices.count() == 0u || indices.data == nullptr) throw std::runtime_error{"indices field is empty"};
         if (!std::isfinite(scale)) throw std::runtime_error{"field scale must be finite"};
         if (!std::isfinite(bias)) throw std::runtime_error{"field bias must be finite"};
-        cuda::field::add_unmasked_scalar_to_component(stream, destination.data[axis], source.data, mask, destination.count(), scale, bias);
+        cuda::field::add_unmasked_scalar_to_component(stream, destination.data[axis], source.data, indices.data, destination.count(), scale, bias);
     }
 
     void fill(cudaStream_t stream, ScalarField3D& values, const float value) {
+        if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
+        if (values.count() == 0u || values.data == nullptr) throw std::runtime_error{"values field is empty"};
+        cuda::field::fill(stream, values.data, values.count(), value);
+    }
+
+    void fill(cudaStream_t stream, IndexedField3D& values, const std::uint32_t value) {
         if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
         if (values.count() == 0u || values.data == nullptr) throw std::runtime_error{"values field is empty"};
         cuda::field::fill(stream, values.data, values.count(), value);

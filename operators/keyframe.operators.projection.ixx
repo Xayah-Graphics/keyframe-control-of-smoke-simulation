@@ -17,7 +17,7 @@ export namespace kfs::operators {
         Projection(Projection&&) noexcept            = delete;
         Projection& operator=(Projection&&) noexcept = delete;
 
-        void operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const std::uint8_t* cell_mask, float delta_seconds);
+        void operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, float delta_seconds);
 
     private:
         void initialize();

@@ -48,10 +48,16 @@ namespace kfs::cuda::field {
             values[index] = value;
         }
 
-        __global__ void copy_masked_kernel(float* destination, const float* source, const std::uint8_t* mask, const std::uint64_t count) {
+        __global__ void fill_indexed_kernel(std::uint32_t* values, const std::uint32_t value, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
-            if (mask[index] == 0u) return;
+            values[index] = value;
+        }
+
+        __global__ void copy_masked_kernel(float* destination, const float* source, const std::uint32_t* indices, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            if (indices[index] == 0u) return;
             destination[index] = source[index];
         }
 
@@ -61,10 +67,10 @@ namespace kfs::cuda::field {
             destination[index] = current[index] + scale * source[index];
         }
 
-        __global__ void add_unmasked_scalar_to_component_kernel(float* destination, const float* source, const std::uint8_t* mask, const float scale, const float bias, const std::uint64_t count) {
+        __global__ void add_unmasked_scalar_to_component_kernel(float* destination, const float* source, const std::uint32_t* indices, const float scale, const float bias, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
-            if (mask[index] != 0u) return;
+            if (indices[index] != 0u) return;
             destination[index] += scale * (source[index] + bias);
         }
 
@@ -142,8 +148,13 @@ namespace kfs::cuda::field {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void copy_masked(cudaStream_t stream, float* const destination, const float* const source, const std::uint8_t* const mask, const std::uint64_t count) {
-        copy_masked_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, mask, count);
+    void fill(cudaStream_t stream, std::uint32_t* const values, const std::uint64_t count, const std::uint32_t value) {
+        fill_indexed_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(values, value, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_indexed_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void copy_masked(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count) {
+        copy_masked_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"copy_masked_kernel: "} + cudaGetErrorString(status)};
     }
 
@@ -152,8 +163,8 @@ namespace kfs::cuda::field {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_scaled_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void add_unmasked_scalar_to_component(cudaStream_t stream, float* const destination, const float* const source, const std::uint8_t* const mask, const std::uint64_t count, const float scale, const float bias) {
-        add_unmasked_scalar_to_component_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, mask, scale, bias, count);
+    void add_unmasked_scalar_to_component(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count, const float scale, const float bias) {
+        add_unmasked_scalar_to_component_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, scale, bias, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_unmasked_scalar_to_component_kernel: "} + cudaGetErrorString(status)};
     }
 

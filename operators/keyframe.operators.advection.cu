@@ -50,17 +50,16 @@ namespace kfs::cuda::operators::advection {
         return position;
     }
 
-    __device__ bool resolve_mask_cell(int& x, int& y, int& z, const int nx, const int ny, const int nz, const boundary::FlowBoundary boundary_config) {
+    __device__ bool resolve_index_cell(int& x, int& y, int& z, const int nx, const int ny, const int nz, const boundary::FlowBoundary boundary_config) {
         if (boundary::flow_periodic_pair(boundary_config, 0u) && nx > 0) x = boundary::wrap_index(x, nx);
         if (boundary::flow_periodic_pair(boundary_config, 1u) && ny > 0) y = boundary::wrap_index(y, ny);
         if (boundary::flow_periodic_pair(boundary_config, 2u) && nz > 0) z = boundary::wrap_index(z, nz);
         return boundary::cell_in_bounds(x, y, z, nx, ny, nz);
     }
 
-    __device__ bool masked_cell(const std::uint8_t* cell_mask, int x, int y, int z, const int nx, const int ny, const int nz, const boundary::FlowBoundary boundary_config) {
-        if (cell_mask == nullptr) return false;
-        if (!resolve_mask_cell(x, y, z, nx, ny, nz, boundary_config)) return true;
-        return cell_mask[boundary::index_3d(x, y, z, nx, ny)] != 0;
+    __device__ bool marked_cell(const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const boundary::FlowBoundary boundary_config) {
+        if (!resolve_index_cell(x, y, z, nx, ny, nz, boundary_config)) return true;
+        return cell_indices[boundary::index_3d(x, y, z, nx, ny)] != 0u;
     }
 
     __device__ float linear_interpolate(const float c000, const float c100, const float c010, const float c110, const float c001, const float c101, const float c011, const float c111, const float tx, const float ty, const float tz) {
@@ -253,32 +252,31 @@ namespace kfs::cuda::operators::advection {
             sample_staggered_component_linear(z_component, 2u, position, nx, ny, nz, h, boundary_config));
     }
 
-    __device__ bool position_hits_mask(const float3 position, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const boundary::FlowBoundary boundary_config) {
+    __device__ bool position_hits_marked_cell(const float3 position, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const boundary::FlowBoundary boundary_config) {
         const float3 wrapped = wrap_vector_position(position, nx, ny, nz, h, boundary_config);
         if (wrapped.x < 0.0f || wrapped.x > static_cast<float>(nx) * h || wrapped.y < 0.0f || wrapped.y > static_cast<float>(ny) * h || wrapped.z < 0.0f || wrapped.z > static_cast<float>(nz) * h) return true;
-        if (cell_mask == nullptr) return false;
         int cell_x = static_cast<int>(floorf(wrapped.x / h));
         int cell_y = static_cast<int>(floorf(wrapped.y / h));
         int cell_z = static_cast<int>(floorf(wrapped.z / h));
         if (cell_x == nx) cell_x = nx - 1;
         if (cell_y == ny) cell_y = ny - 1;
         if (cell_z == nz) cell_z = nz - 1;
-        return !boundary::cell_in_bounds(cell_x, cell_y, cell_z, nx, ny, nz) || cell_mask[boundary::index_3d(cell_x, cell_y, cell_z, nx, ny)] != 0;
+        return !boundary::cell_in_bounds(cell_x, cell_y, cell_z, nx, ny, nz) || cell_indices[boundary::index_3d(cell_x, cell_y, cell_z, nx, ny)] != 0u;
     }
 
-    __device__ float3 trace_rk2(const float3 start, const float* x_component, const float* y_component, const float* z_component, const std::uint8_t* cell_mask, const float dt, const int nx, const int ny, const int nz, const float h, const boundary::FlowBoundary boundary_config) {
+    __device__ float3 trace_rk2(const float3 start, const float* x_component, const float* y_component, const float* z_component, const std::uint32_t* cell_indices, const float dt, const int nx, const int ny, const int nz, const float h, const boundary::FlowBoundary boundary_config) {
         const float3 value0 = sample_staggered_vector(x_component, y_component, z_component, start, nx, ny, nz, h, boundary_config);
         const float3 mid    = make_float3(start.x - 0.5f * dt * value0.x, start.y - 0.5f * dt * value0.y, start.z - 0.5f * dt * value0.z);
         const float3 value1 = sample_staggered_vector(x_component, y_component, z_component, mid, nx, ny, nz, h, boundary_config);
         const float3 traced = make_float3(start.x - dt * value1.x, start.y - dt * value1.y, start.z - dt * value1.z);
-        if (!position_hits_mask(traced, cell_mask, nx, ny, nz, h, boundary_config)) return traced;
+        if (!position_hits_marked_cell(traced, cell_indices, nx, ny, nz, h, boundary_config)) return traced;
 
         float lo = 0.0f;
         float hi = 1.0f;
         for (int iteration = 0; iteration < 10; ++iteration) {
             const float t     = 0.5f * (lo + hi);
             const float3 test = make_float3(start.x + (traced.x - start.x) * t, start.y + (traced.y - start.y) * t, start.z + (traced.z - start.z) * t);
-            if (position_hits_mask(test, cell_mask, nx, ny, nz, h, boundary_config)) hi = t;
+            if (position_hits_marked_cell(test, cell_indices, nx, ny, nz, h, boundary_config)) hi = t;
             else lo = t;
         }
         return make_float3(start.x + (traced.x - start.x) * lo, start.y + (traced.y - start.y) * lo, start.z + (traced.z - start.z) * lo);
@@ -288,31 +286,31 @@ namespace kfs::cuda::operators::advection {
         return make_float3((static_cast<float>(i) + (axis == 0u ? 0.0f : 0.5f)) * h, (static_cast<float>(j) + (axis == 1u ? 0.0f : 0.5f)) * h, (static_cast<float>(k) + (axis == 2u ? 0.0f : 0.5f)) * h);
     }
 
-    __global__ void advect_staggered_component_kernel(const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const boundary::FlowBoundary boundary_config) {
+    __global__ void advect_staggered_component_kernel(const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const boundary::FlowBoundary boundary_config) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= staggered_extent(axis, 0u, nx, ny, nz) || j >= staggered_extent(axis, 1u, nx, ny, nz) || k >= staggered_extent(axis, 2u, nx, ny, nz)) return;
         const float3 start    = staggered_sample_position(axis, i, j, k, h);
-        const float3 position = trace_rk2(start, vector_x, vector_y, vector_z, cell_mask, dt, nx, ny, nz, h, boundary_config);
+        const float3 position = trace_rk2(start, vector_x, vector_y, vector_z, cell_indices, dt, nx, ny, nz, h, boundary_config);
         destination[index_staggered(axis, i, j, k, nx, ny)] = scheme == scheme_monotonic_cubic ? sample_staggered_component_cubic(source, axis, position, nx, ny, nz, h, boundary_config) : sample_staggered_component_linear(source, axis, position, nx, ny, nz, h, boundary_config);
     }
 
-    __global__ void advect_centered_scalar_kernel(float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const boundary::ScalarBoundary scalar_boundary, const boundary::FlowBoundary vector_boundary) {
+    __global__ void advect_centered_scalar_kernel(float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t scheme, const boundary::ScalarBoundary scalar_boundary, const boundary::FlowBoundary vector_boundary) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (x >= nx || y >= ny || z >= nz) return;
-        if (masked_cell(cell_mask, x, y, z, nx, ny, nz, vector_boundary)) {
+        if (marked_cell(cell_indices, x, y, z, nx, ny, nz, vector_boundary)) {
             destination[boundary::index_3d(x, y, z, nx, ny)] = 0.0f;
             return;
         }
         const float3 start    = make_float3((static_cast<float>(x) + 0.5f) * h, (static_cast<float>(y) + 0.5f) * h, (static_cast<float>(z) + 0.5f) * h);
-        const float3 position = trace_rk2(start, vector_x, vector_y, vector_z, cell_mask, dt, nx, ny, nz, h, vector_boundary);
+        const float3 position = trace_rk2(start, vector_x, vector_y, vector_z, cell_indices, dt, nx, ny, nz, h, vector_boundary);
         destination[boundary::index_3d(x, y, z, nx, ny)] = scheme == scheme_monotonic_cubic ? sample_scalar_cubic(source, position, nx, ny, nz, h, scalar_boundary) : sample_scalar_linear(source, position, nx, ny, nz, h, scalar_boundary);
     }
 
-    void advect_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* boundary_types, const float* boundary_values) {
+    void advect_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* boundary_types, const float* boundary_values) {
         if (axis >= 3u) throw std::runtime_error{"advect_staggered_component: axis must be 0, 1, or 2"};
         if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Advection resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
@@ -321,17 +319,17 @@ namespace kfs::cuda::operators::advection {
         const auto sz = static_cast<std::uint64_t>(nz) + (axis == 2u ? 1u : 0u);
         const dim3 grid{ceil_div_u32(sx, block.x), ceil_div_u32(sy, block.y), ceil_div_u32(sz, block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(boundary_types, boundary_values);
-        advect_staggered_component_kernel<<<grid, block, 0, stream>>>(axis, destination, source, vector_x, vector_y, vector_z, cell_mask, nx, ny, nz, h, dt, advection_mode, boundary_config);
+        advect_staggered_component_kernel<<<grid, block, 0, stream>>>(axis, destination, source, vector_x, vector_y, vector_z, cell_indices, nx, ny, nz, h, dt, advection_mode, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_staggered_component_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void advect_centered_scalar(cudaStream_t stream, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint8_t* cell_mask, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values, const std::uint32_t* vector_boundary_types, const float* vector_boundary_values) {
+    void advect_centered_scalar(cudaStream_t stream, float* destination, const float* source, const float* vector_x, const float* vector_y, const float* vector_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t advection_mode, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values, const std::uint32_t* vector_boundary_types, const float* vector_boundary_values) {
         if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Advection resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
         const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::ScalarBoundary scalar_boundary = boundary::make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
         const boundary::FlowBoundary vector_boundary   = boundary::make_flow_velocity_boundary(vector_boundary_types, vector_boundary_values);
-        advect_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, vector_x, vector_y, vector_z, cell_mask, nx, ny, nz, h, dt, advection_mode, scalar_boundary, vector_boundary);
+        advect_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, vector_x, vector_y, vector_z, cell_indices, nx, ny, nz, h, dt, advection_mode, scalar_boundary, vector_boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"advect_centered_scalar_kernel: "} + cudaGetErrorString(status)};
     }
 } // namespace kfs::cuda::operators::advection

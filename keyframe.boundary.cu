@@ -7,7 +7,7 @@ namespace kfs::cuda::boundary {
         return static_cast<unsigned>((value + divisor - 1u) / divisor);
     }
 
-    __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint8_t* occupancy, const float* solid_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_velocity_x_boundaries_kernel(float* velocity_x, const std::uint32_t* cell_indices, const float* solid_velocity_x, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -32,8 +32,6 @@ namespace kfs::cuda::boundary {
                 return;
             }
         }
-        if (occupancy == nullptr) return;
-
         int left_x                = i - 1;
         int left_y                = j;
         int left_z                = k;
@@ -42,24 +40,24 @@ namespace kfs::cuda::boundary {
         int right_z               = k;
         const bool has_left       = resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary);
         const bool has_right      = resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary);
-        const bool left_occupied  = has_left && occupancy[index_3d(left_x, left_y, left_z, nx, ny)] != 0;
-        const bool right_occupied = has_right && occupancy[index_3d(right_x, right_y, right_z, nx, ny)] != 0;
+        const bool left_occupied  = has_left && cell_indices[index_3d(left_x, left_y, left_z, nx, ny)] != 0u;
+        const bool right_occupied = has_right && cell_indices[index_3d(right_x, right_y, right_z, nx, ny)] != 0u;
         if (!left_occupied && !right_occupied) return;
 
         float value  = 0.0f;
         float weight = 0.0f;
         if (left_occupied) {
-            value += constraint_velocity_value(solid_velocity_x, occupancy, left_x, left_y, left_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_x, cell_indices, left_x, left_y, left_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (right_occupied) {
-            value += constraint_velocity_value(solid_velocity_x, occupancy, right_x, right_y, right_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_x, cell_indices, right_x, right_y, right_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void enforce_velocity_y_boundaries_kernel(float* velocity_y, const std::uint8_t* occupancy, const float* solid_velocity_y, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_velocity_y_boundaries_kernel(float* velocity_y, const std::uint32_t* cell_indices, const float* solid_velocity_y, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -84,8 +82,6 @@ namespace kfs::cuda::boundary {
                 return;
             }
         }
-        if (occupancy == nullptr) return;
-
         int down_x               = i;
         int down_y               = j - 1;
         int down_z               = k;
@@ -94,24 +90,24 @@ namespace kfs::cuda::boundary {
         int up_z                 = k;
         const bool has_down      = resolve_cell_coordinates(down_x, down_y, down_z, nx, ny, nz, boundary);
         const bool has_up        = resolve_cell_coordinates(up_x, up_y, up_z, nx, ny, nz, boundary);
-        const bool down_occupied = has_down && occupancy[index_3d(down_x, down_y, down_z, nx, ny)] != 0;
-        const bool up_occupied   = has_up && occupancy[index_3d(up_x, up_y, up_z, nx, ny)] != 0;
+        const bool down_occupied = has_down && cell_indices[index_3d(down_x, down_y, down_z, nx, ny)] != 0u;
+        const bool up_occupied   = has_up && cell_indices[index_3d(up_x, up_y, up_z, nx, ny)] != 0u;
         if (!down_occupied && !up_occupied) return;
 
         float value  = 0.0f;
         float weight = 0.0f;
         if (down_occupied) {
-            value += constraint_velocity_value(solid_velocity_y, occupancy, down_x, down_y, down_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_y, cell_indices, down_x, down_y, down_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (up_occupied) {
-            value += constraint_velocity_value(solid_velocity_y, occupancy, up_x, up_y, up_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_y, cell_indices, up_x, up_y, up_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
     }
 
-    __global__ void enforce_velocity_z_boundaries_kernel(float* velocity_z, const std::uint8_t* occupancy, const float* solid_velocity_z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __global__ void enforce_velocity_z_boundaries_kernel(float* velocity_z, const std::uint32_t* cell_indices, const float* solid_velocity_z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -136,8 +132,6 @@ namespace kfs::cuda::boundary {
                 return;
             }
         }
-        if (occupancy == nullptr) return;
-
         int back_x                = i;
         int back_y                = j;
         int back_z                = k - 1;
@@ -146,18 +140,18 @@ namespace kfs::cuda::boundary {
         int front_z               = k;
         const bool has_back       = resolve_cell_coordinates(back_x, back_y, back_z, nx, ny, nz, boundary);
         const bool has_front      = resolve_cell_coordinates(front_x, front_y, front_z, nx, ny, nz, boundary);
-        const bool back_occupied  = has_back && occupancy[index_3d(back_x, back_y, back_z, nx, ny)] != 0;
-        const bool front_occupied = has_front && occupancy[index_3d(front_x, front_y, front_z, nx, ny)] != 0;
+        const bool back_occupied  = has_back && cell_indices[index_3d(back_x, back_y, back_z, nx, ny)] != 0u;
+        const bool front_occupied = has_front && cell_indices[index_3d(front_x, front_y, front_z, nx, ny)] != 0u;
         if (!back_occupied && !front_occupied) return;
 
         float value  = 0.0f;
         float weight = 0.0f;
         if (back_occupied) {
-            value += constraint_velocity_value(solid_velocity_z, occupancy, back_x, back_y, back_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_z, cell_indices, back_x, back_y, back_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (front_occupied) {
-            value += constraint_velocity_value(solid_velocity_z, occupancy, front_x, front_y, front_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_z, cell_indices, front_x, front_y, front_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
@@ -184,14 +178,14 @@ namespace kfs::cuda::boundary {
         velocity_z[index_velocity_z(i, j, nz, nx, ny)] = velocity_z[index_velocity_z(i, j, 0, nx, ny)];
     }
 
-    __global__ void boundary_fill_centered_scalar_kernel(float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const ScalarBoundary boundary) {
+    __global__ void boundary_fill_centered_scalar_kernel(float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const ScalarBoundary boundary) {
         const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (x >= nx || y >= ny || z >= nz) return;
 
         const auto index = index_3d(x, y, z, nx, ny);
-        if (occupancy == nullptr || occupancy[index] == 0) {
+        if (cell_indices[index] == 0u) {
             destination[index] = source[index];
             return;
         }
@@ -215,7 +209,7 @@ namespace kfs::cuda::boundary {
                         int next_z = z + dz;
                         if (!resolve_scalar_cell_coordinates(next_x, next_y, next_z, nx, ny, nz, boundary)) continue;
                         const auto neighbor_index = index_3d(next_x, next_y, next_z, nx, ny);
-                        if (occupancy[neighbor_index] != 0) continue;
+                        if (cell_indices[neighbor_index] != 0u) continue;
                         const int distance2 = dx * dx + dy * dy + dz * dz;
                         if (!found || distance2 < best_distance2) {
                             found          = true;
@@ -233,7 +227,7 @@ namespace kfs::cuda::boundary {
         destination[index] = 0.0f;
     }
 
-    void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint8_t* occupancy, const float* solid_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
+    void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* solid_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
         if (axis >= 3u) throw std::runtime_error{"enforce_staggered_boundary: axis must be 0, 1, or 2"};
         if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
@@ -242,9 +236,9 @@ namespace kfs::cuda::boundary {
         const auto nz64             = static_cast<std::uint64_t>(nz);
         const dim3 grid             = axis == 0u ? dim3{ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)} : axis == 1u ? dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)} : dim3{ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z)};
         const FlowBoundary boundary = make_flow_velocity_boundary(flow_types, flow_velocity);
-        if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
-        if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
-        if (axis == 2u) enforce_velocity_z_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, occupancy, solid_velocity_component, nx, ny, nz, boundary);
+        if (axis == 0u) enforce_velocity_x_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, solid_velocity_component, nx, ny, nz, boundary);
+        if (axis == 1u) enforce_velocity_y_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, solid_velocity_component, nx, ny, nz, boundary);
+        if (axis == 2u) enforce_velocity_z_boundaries_kernel<<<grid, block, 0, stream>>>(velocity_component, cell_indices, solid_velocity_component, nx, ny, nz, boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"enforce_staggered_boundary_kernel: "} + cudaGetErrorString(status)};
     }
 
@@ -259,12 +253,12 @@ namespace kfs::cuda::boundary {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"sync_periodic_staggered_component_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint8_t* occupancy, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
+    void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
         if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
         const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const ScalarBoundary boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);
-        boundary_fill_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, occupancy, nx, ny, nz, boundary);
+        boundary_fill_centered_scalar_kernel<<<grid, block, 0, stream>>>(destination, source, cell_indices, nx, ny, nz, boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"boundary_fill_centered_scalar_kernel: "} + cudaGetErrorString(status)};
     }
 } // namespace kfs::cuda::boundary

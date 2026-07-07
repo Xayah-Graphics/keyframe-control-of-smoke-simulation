@@ -52,13 +52,12 @@ namespace kfs::solver {
             field::fill(host.stream, device.temp_velocity, 0.0f);
             field::fill(host.stream, device.centered_velocity, 0.0f);
             field::fill(host.stream, device.solid_temperature, host.ambient_temperature);
-            if (const cudaError_t status = cudaMemsetAsync(device.occupancy, 0, device.density_data.count() * sizeof(std::uint8_t), host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync occupancy: "} + cudaGetErrorString(status)};
+            field::fill(host.stream, device.occupancy, 0u);
         }
 
         void destroy_device(Solver& smoke) noexcept {
             try {
                 if (smoke.host.stream != nullptr) cudaStreamSynchronize(smoke.host.stream);
-                cuda::free_device_buffers(smoke.device.occupancy);
                 if (smoke.host.stream != nullptr) cudaStreamDestroy(smoke.host.stream);
             } catch (...) {
             }
@@ -86,8 +85,7 @@ namespace kfs::solver {
                 device.temp_velocity.resize(resolution);
                 device.centered_velocity.resize(resolution);
                 device.solid_temperature.resize(resolution);
-                const auto cell_count = device.density_data.count();
-                if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&device.occupancy), static_cast<std::size_t>(cell_count) * sizeof(std::uint8_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy: "} + cudaGetErrorString(status)};
+                device.occupancy.resize(resolution);
 
                 initialize_field_buffers(host, device);
             } catch (...) {

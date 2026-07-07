@@ -85,16 +85,16 @@ namespace kfs::boundary {
         };
     }
 
-    void enforce_staggered_boundary(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values, const std::uint8_t* occupancy, const field::CenteredVectorField3D& solid_velocity, const PackedFlowBoundary& boundary) {
+    void enforce_staggered_boundary(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values, const field::IndexedField3D& cell_indices, const field::CenteredVectorField3D& solid_velocity, const PackedFlowBoundary& boundary) {
         if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
         if (axis >= 3u) throw std::runtime_error{"Boundary axis must be 0, 1, or 2"};
-        if (values.resolution != solid_velocity.resolution) throw std::runtime_error{"Boundary staggered and solid velocity resolution mismatch"};
+        if (values.resolution != solid_velocity.resolution || values.resolution != cell_indices.resolution) throw std::runtime_error{"Boundary field resolution mismatch"};
         if (values.count(axis) == 0u || values.data[axis] == nullptr) throw std::runtime_error{"velocity field component is empty"};
+        if (cell_indices.count() == 0u || cell_indices.data == nullptr) throw std::runtime_error{"cell_indices field is empty"};
         if (solid_velocity.count() == 0u) throw std::runtime_error{"solid_velocity field is empty"};
         for (std::uint32_t solid_axis = 0u; solid_axis < 3u; ++solid_axis)
             if (solid_velocity.data[solid_axis] == nullptr) throw std::runtime_error{"solid_velocity field component is empty"};
-        if (occupancy == nullptr) throw std::runtime_error{"Boundary occupancy must not be null"};
-        cuda::boundary::enforce_staggered_boundary(stream, axis, values.data[axis], occupancy, solid_velocity.data[axis], values.resolution[0], values.resolution[1], values.resolution[2], boundary.types.data(), boundary.velocity.data());
+        cuda::boundary::enforce_staggered_boundary(stream, axis, values.data[axis], cell_indices.data, solid_velocity.data[axis], values.resolution[0], values.resolution[1], values.resolution[2], boundary.types.data(), boundary.velocity.data());
     }
 
     void sync_periodic_staggered_component(const cudaStream_t stream, const std::uint32_t axis, field::StaggeredVectorField3D& values) {
@@ -104,12 +104,12 @@ namespace kfs::boundary {
         cuda::boundary::sync_periodic_staggered_component(stream, axis, values.data[axis], values.resolution[0], values.resolution[1], values.resolution[2]);
     }
 
-    void boundary_fill_centered_scalar(const cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const std::uint8_t* occupancy, const PackedScalarBoundary& boundary) {
+    void boundary_fill_centered_scalar(const cudaStream_t stream, field::ScalarField3D& destination, const field::ScalarField3D& source, const field::IndexedField3D& cell_indices, const PackedScalarBoundary& boundary) {
         if (stream == nullptr) throw std::runtime_error{"Boundary stream must not be null"};
-        if (destination.resolution != source.resolution) throw std::runtime_error{"Boundary scalar field resolution mismatch"};
+        if (destination.resolution != source.resolution || destination.resolution != cell_indices.resolution) throw std::runtime_error{"Boundary field resolution mismatch"};
         if (destination.count() == 0u || destination.data == nullptr) throw std::runtime_error{"destination field is empty"};
         if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
-        if (occupancy == nullptr) throw std::runtime_error{"Boundary occupancy must not be null"};
-        cuda::boundary::boundary_fill_centered_scalar(stream, destination.data, source.data, occupancy, destination.resolution[0], destination.resolution[1], destination.resolution[2], boundary.types.data(), boundary.values.data());
+        if (cell_indices.count() == 0u || cell_indices.data == nullptr) throw std::runtime_error{"cell_indices field is empty"};
+        cuda::boundary::boundary_fill_centered_scalar(stream, destination.data, source.data, cell_indices.data, destination.resolution[0], destination.resolution[1], destination.resolution[2], boundary.types.data(), boundary.values.data());
     }
 } // namespace kfs::boundary

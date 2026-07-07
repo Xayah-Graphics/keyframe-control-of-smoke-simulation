@@ -72,7 +72,7 @@ namespace kfs::solver {
             field::StaggeredVectorField3D temp_velocity{{0, 0, 0}};
             field::CenteredVectorField3D centered_velocity{{0, 0, 0}};
             field::ScalarField3D solid_temperature{{0, 0, 0}};
-            std::uint8_t* occupancy{nullptr};
+            field::IndexedField3D occupancy{{0, 0, 0}};
         } device;
 
     private:

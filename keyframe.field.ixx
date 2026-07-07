@@ -29,6 +29,23 @@ export namespace kfs::field {
         ScalarFieldStorageKind storage_kind{ScalarFieldStorageKind::owned};
     };
 
+    struct IndexedField3D final {
+        explicit IndexedField3D(std::array<std::int32_t, 3> resolution);
+        ~IndexedField3D() noexcept;
+        IndexedField3D(const IndexedField3D&)            = delete;
+        IndexedField3D& operator=(const IndexedField3D&) = delete;
+        IndexedField3D(IndexedField3D&& other) noexcept;
+        IndexedField3D& operator=(IndexedField3D&& other) noexcept;
+
+        [[nodiscard]] std::uint64_t count() const;
+        [[nodiscard]] std::size_t bytes() const;
+
+        void resize(std::array<std::int32_t, 3> resolution);
+
+        std::array<std::int32_t, 3> resolution;
+        std::uint32_t* data{nullptr};
+    };
+
     struct CenteredVectorField3D final {
         explicit CenteredVectorField3D(std::array<std::int32_t, 3> resolution);
         ~CenteredVectorField3D() noexcept;
@@ -64,16 +81,18 @@ export namespace kfs::field {
     };
 
     void fill(cudaStream_t stream, ScalarField3D& values, float value);
+    void fill(cudaStream_t stream, IndexedField3D& values, std::uint32_t value);
     void fill(cudaStream_t stream, CenteredVectorField3D& values, float value);
     void fill(cudaStream_t stream, StaggeredVectorField3D& values, float value);
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source);
-    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const std::uint8_t* mask);
+    void copy(cudaStream_t stream, IndexedField3D& destination, const IndexedField3D& source);
+    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices);
     void copy(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source);
     void copy(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source);
     void copy_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source);
     void copy_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const StaggeredVectorField3D& source);
     void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, float scale);
-    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, const std::uint8_t* mask, float scale, float bias);
+    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, const IndexedField3D& indices, float scale, float bias);
     void add_scaled(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, float scale);
     void add_scaled(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, float scale);
     void upload(cudaStream_t stream, ScalarField3D& destination, std::span<const float> source);
