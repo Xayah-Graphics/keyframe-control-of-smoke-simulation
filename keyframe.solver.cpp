@@ -6,6 +6,7 @@ module keyframe.solver;
 import std;
 import keyframe.field;
 import keyframe.boundary;
+import keyframe.collider;
 import keyframe.operators.advection;
 import keyframe.operators.emitter;
 import keyframe.operators.projection;
@@ -30,24 +31,24 @@ namespace kfs::solver {
         this->device.temperature_data.resize(this->resolution);
         this->device.temperature_temp.resize(this->resolution);
         this->device.force.resize(this->resolution);
-        this->device.solid_velocity.resize(this->resolution);
+        this->device.constraint_velocity.resize(this->resolution);
         this->device.velocity.resize(this->resolution);
         this->device.temp_velocity.resize(this->resolution);
         this->device.centered_velocity.resize(this->resolution);
-        this->device.solid_temperature.resize(this->resolution);
-        this->device.occupancy.resize(this->resolution);
+        this->device.constraint_scalar.resize(this->resolution);
+        this->device.cell_indices.resize(this->resolution);
 
         field::fill(this->stream, this->device.density_data, 0.0f);
         field::fill(this->stream, this->device.density_temp, 0.0f);
         field::fill(this->stream, this->device.temperature_data, this->ambient_temperature);
         field::fill(this->stream, this->device.temperature_temp, this->ambient_temperature);
         field::fill(this->stream, this->device.force, 0.0f);
-        field::fill(this->stream, this->device.solid_velocity, 0.0f);
+        field::fill(this->stream, this->device.constraint_velocity, 0.0f);
         field::fill(this->stream, this->device.velocity, 0.0f);
         field::fill(this->stream, this->device.temp_velocity, 0.0f);
         field::fill(this->stream, this->device.centered_velocity, 0.0f);
-        field::fill(this->stream, this->device.solid_temperature, this->ambient_temperature);
-        field::fill(this->stream, this->device.occupancy, 0u);
+        field::fill(this->stream, this->device.constraint_scalar, 0.0f);
+        field::fill(this->stream, this->device.cell_indices, 0u);
     }
 
     std::expected<StepStats, std::string> Solver::step(const StepRequest& request) {
@@ -59,31 +60,32 @@ namespace kfs::solver {
             cudaStream_t stream             = this->stream;
             const auto step_start           = std::chrono::steady_clock::now();
             const float delta_seconds       = request.delta_seconds;
+            this->colliders.rasterize(stream, device.cell_indices, device.constraint_velocity, device.constraint_scalar, this->cell_size);
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
-                    field::copy(stream, device.temperature_data, device.solid_temperature, device.occupancy, field::IndexSelection::marked);
+                    field::copy(stream, device.temperature_data, device.constraint_scalar, device.cell_indices, field::IndexSelection::marked);
                     field::sample(stream, device.centered_velocity, device.velocity);
                     field::fill(stream, device.force, 0.0f);
-                    field::add(stream, device.force, 1u, device.density_data, -this->buoyancy_density_factor, 0.0f, device.occupancy, field::IndexSelection::unmarked);
-                    field::add(stream, device.force, 1u, device.temperature_data, this->buoyancy_temperature_factor, -this->ambient_temperature, device.occupancy, field::IndexSelection::unmarked);
-                    this->vorticity(device.force, device.centered_velocity, device.occupancy, velocity_boundary);
+                    field::add(stream, device.force, 1u, device.density_data, -this->buoyancy_density_factor, 0.0f, device.cell_indices, field::IndexSelection::unmarked);
+                    field::add(stream, device.force, 1u, device.temperature_data, this->buoyancy_temperature_factor, -this->ambient_temperature, device.cell_indices, field::IndexSelection::unmarked);
+                    this->vorticity(device.force, device.centered_velocity, device.cell_indices, velocity_boundary);
                     field::add(stream, device.velocity, device.force, delta_seconds);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        boundary::enforce(stream, axis, device.velocity, device.occupancy, device.solid_velocity, velocity_boundary);
+                        boundary::enforce(stream, axis, device.velocity, device.cell_indices, device.constraint_velocity, velocity_boundary);
                         if (velocity_boundary.periodic[axis]) boundary::synchronize(stream, axis, device.velocity);
                     }
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        this->advection(device.temp_velocity, axis, device.velocity, device.velocity, device.occupancy, delta_seconds, velocity_boundary);
-                        boundary::enforce(stream, axis, device.temp_velocity, device.occupancy, device.solid_velocity, velocity_boundary);
+                        this->advection(device.temp_velocity, axis, device.velocity, device.velocity, device.cell_indices, delta_seconds, velocity_boundary);
+                        boundary::enforce(stream, axis, device.temp_velocity, device.cell_indices, device.constraint_velocity, velocity_boundary);
                         if (velocity_boundary.periodic[axis]) boundary::synchronize(stream, axis, device.temp_velocity);
                     }
-                    this->projection(device.velocity, device.temp_velocity, device.solid_velocity, device.occupancy, velocity_boundary, delta_seconds);
+                    this->projection(device.velocity, device.temp_velocity, device.constraint_velocity, device.cell_indices, velocity_boundary, delta_seconds);
                     this->emitter(device.density_temp, device.density_data, this->density_emission_rate, delta_seconds);
                     this->emitter(device.temperature_temp, device.temperature_data, this->temperature_emission_rate, delta_seconds);
-                    this->advection(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, temperature_boundary, velocity_boundary);
-                    field::copy(stream, device.temperature_data, device.solid_temperature, device.occupancy, field::IndexSelection::marked);
-                    this->advection(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, density_boundary, velocity_boundary);
-                    boundary::extrapolate(stream, device.density_temp, device.density_data, device.occupancy, density_boundary);
+                    this->advection(device.temperature_data, device.temperature_temp, device.velocity, device.cell_indices, delta_seconds, temperature_boundary, velocity_boundary);
+                    field::copy(stream, device.temperature_data, device.constraint_scalar, device.cell_indices, field::IndexSelection::marked);
+                    this->advection(device.density_data, device.density_temp, device.velocity, device.cell_indices, delta_seconds, density_boundary, velocity_boundary);
+                    boundary::extrapolate(stream, device.density_temp, device.density_data, device.cell_indices, density_boundary);
                     field::copy(stream, device.density_data, device.density_temp);
                     ++this->current_step;
                 }

@@ -79,6 +79,9 @@ target_sources(
         keyframe.boundary.cu
         keyframe.boundary.cuh
         keyframe.boundary.h
+        keyframe.collider.cpp
+        keyframe.collider.cu
+        keyframe.collider.h
         operators/keyframe.operators.advection.cpp
         operators/keyframe.operators.advection.cu
         operators/keyframe.operators.advection.h
@@ -97,6 +100,7 @@ target_sources(
         keyframe.field.ixx
         keyframe.geometry.ixx
         keyframe.boundary.ixx
+        keyframe.collider.ixx
         operators/keyframe.operators.advection.ixx
         operators/keyframe.operators.emitter.ixx
         operators/keyframe.operators.projection.ixx

@@ -28,29 +28,49 @@ module keyframe.project;
 import keyframe.field;
 import keyframe.plugin;
 import keyframe.solver;
+import keyframe.collider;
+import keyframe.geometry;
 import std;
 
 namespace kfs::project {
     namespace {
-        constexpr char section_simulation_id[]     = "simulation";
-        constexpr char section_view_id[]           = "view";
-        constexpr char section_statistics_id[]     = "statistics";
-        constexpr char setting_show_volume_key[]   = "show_volume";
-        constexpr char setting_density_scale_key[] = "density_scale";
-        constexpr char setting_show_domain_key[]   = "show_domain";
-        constexpr char density_volume_name[]       = "Keyframe Smoke Density";
-        constexpr char density_material_name[]     = "Keyframe Smoke Density Material";
-        constexpr char density_light_name[]        = "Keyframe Smoke Key Light";
-        constexpr char domain_segments_name[]      = "Keyframe Smoke Domain";
-        constexpr float default_density_scale      = 4.0f;
+        constexpr char scene_free_plume[]                    = "free_plume";
+        constexpr char scene_obstacle_gallery[]              = "obstacle_gallery";
+        constexpr char scene_moving_gate[]                   = "moving_gate";
+        constexpr char section_scene_id[]                    = "scene";
+        constexpr char section_simulation_id[]               = "simulation";
+        constexpr char section_view_id[]                     = "view";
+        constexpr char section_statistics_id[]               = "statistics";
+        constexpr char option_scene_key[]                    = "scene";
+        constexpr char setting_show_volume_key[]             = "show_volume";
+        constexpr char setting_density_scale_key[]           = "density_scale";
+        constexpr char setting_show_domain_key[]             = "show_domain";
+        constexpr char setting_show_scene_geometry_key[]     = "show_scene_geometry";
+        constexpr char density_volume_name[]                 = "Keyframe Smoke Density";
+        constexpr char density_material_name[]               = "Keyframe Smoke Density Material";
+        constexpr char emitter_material_name[]               = "Keyframe Emitter Material";
+        constexpr char collider_box_material_name[]          = "Keyframe Collider Box Material";
+        constexpr char collider_sphere_material_name[]       = "Keyframe Collider Sphere Material";
+        constexpr char density_light_name[]                  = "Keyframe Smoke Key Light";
+        constexpr char domain_segments_name[]                = "Keyframe Smoke Domain";
+        constexpr char emitter_entity_name[]                 = "Keyframe Emitter";
+        constexpr float default_density_scale                = 4.0f;
+
+        enum class ScenePreset : std::uint32_t {
+            free_plume,
+            obstacle_gallery,
+            moving_gate,
+        };
 
         struct DebugOptions final {
             bool show_volume{true};
             bool show_domain{true};
+            bool show_scene_geometry{true};
             float density_scale{default_density_scale};
         };
 
         struct OpenOptions final {
+            ScenePreset preset{ScenePreset::obstacle_gallery};
             std::array<std::uint32_t, 3> resolution{64, 96, 64};
             float vorticity_confinement{0.22f};
             float delta_seconds{1.0f / 60.0f};
@@ -104,12 +124,30 @@ namespace kfs::project {
             return static_cast<std::uint32_t>(value);
         }
 
+        [[nodiscard]] ScenePreset parse_scene_preset(const std::string_view value) {
+            if (value == scene_free_plume) return ScenePreset::free_plume;
+            if (value == scene_obstacle_gallery) return ScenePreset::obstacle_gallery;
+            if (value == scene_moving_gate) return ScenePreset::moving_gate;
+            throw std::runtime_error{std::format("scene must be one of {}, {}, {}.", scene_free_plume, scene_obstacle_gallery, scene_moving_gate)};
+        }
+
+        [[nodiscard]] std::string_view scene_preset_name(const ScenePreset preset) {
+            switch (preset) {
+            case ScenePreset::free_plume: return scene_free_plume;
+            case ScenePreset::obstacle_gallery: return scene_obstacle_gallery;
+            case ScenePreset::moving_gate: return scene_moving_gate;
+            }
+            throw std::runtime_error{"scene preset is invalid."};
+        }
+
         [[nodiscard]] OpenOptions parse_open_options(const std::span<const plugin::Option> options) {
             OpenOptions parsed{};
             std::set<std::string> seen_options;
             for (const plugin::Option& option : options) {
                 if (!seen_options.insert(option.key).second) throw std::runtime_error{std::format("Keyframe smoke open option '{}' is duplicated.", option.key)};
-                if (option.key == "resolution_x")
+                if (option.key == option_scene_key)
+                    parsed.preset = parse_scene_preset(option.value);
+                else if (option.key == "resolution_x")
                     parsed.resolution[0] = parse_u32_option(option.value, "resolution_x");
                 else if (option.key == "resolution_y")
                     parsed.resolution[1] = parse_u32_option(option.value, "resolution_y");
@@ -251,6 +289,67 @@ namespace kfs::project {
             };
         }
 
+        [[nodiscard]] plugin::Sphere ellipsoid_entity(const std::string& name, const geometry::Ellipsoid& ellipsoid, const std::string& material_name) {
+            return plugin::Sphere{
+                .name          = name,
+                .radius        = 1.0f,
+                .material_name = material_name,
+                .transform =
+                    plugin::Transform{
+                        .position = ellipsoid.center,
+                        .scale    = ellipsoid.radius,
+                    },
+            };
+        }
+
+        [[nodiscard]] plugin::Mesh box_entity(const std::string& name, const geometry::Box& box, const std::string& material_name) {
+            return plugin::Mesh{
+                .name = name,
+                .vertices =
+                    {
+                        plugin::MeshVertex{.position = {-1.0f, -1.0f, -1.0f}, .normal = {0.0f, 0.0f, -1.0f}},
+                        plugin::MeshVertex{.position = {1.0f, -1.0f, -1.0f}, .normal = {0.0f, 0.0f, -1.0f}},
+                        plugin::MeshVertex{.position = {1.0f, 1.0f, -1.0f}, .normal = {0.0f, 0.0f, -1.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, 1.0f, -1.0f}, .normal = {0.0f, 0.0f, -1.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, -1.0f, 1.0f}, .normal = {0.0f, 0.0f, 1.0f}},
+                        plugin::MeshVertex{.position = {1.0f, -1.0f, 1.0f}, .normal = {0.0f, 0.0f, 1.0f}},
+                        plugin::MeshVertex{.position = {1.0f, 1.0f, 1.0f}, .normal = {0.0f, 0.0f, 1.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, 1.0f, 1.0f}, .normal = {0.0f, 0.0f, 1.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, -1.0f, -1.0f}, .normal = {-1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, 1.0f, -1.0f}, .normal = {-1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, 1.0f, 1.0f}, .normal = {-1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, -1.0f, 1.0f}, .normal = {-1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, -1.0f, -1.0f}, .normal = {1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, 1.0f, -1.0f}, .normal = {1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, 1.0f, 1.0f}, .normal = {1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, -1.0f, 1.0f}, .normal = {1.0f, 0.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, -1.0f, -1.0f}, .normal = {0.0f, -1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, -1.0f, 1.0f}, .normal = {0.0f, -1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, -1.0f, 1.0f}, .normal = {0.0f, -1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, -1.0f, -1.0f}, .normal = {0.0f, -1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, 1.0f, -1.0f}, .normal = {0.0f, 1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {-1.0f, 1.0f, 1.0f}, .normal = {0.0f, 1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, 1.0f, 1.0f}, .normal = {0.0f, 1.0f, 0.0f}},
+                        plugin::MeshVertex{.position = {1.0f, 1.0f, -1.0f}, .normal = {0.0f, 1.0f, 0.0f}},
+                    },
+                .indices =
+                    {
+                        0u, 1u, 2u, 0u, 2u, 3u,
+                        4u, 6u, 5u, 4u, 7u, 6u,
+                        8u, 9u, 10u, 8u, 10u, 11u,
+                        12u, 14u, 13u, 12u, 15u, 14u,
+                        16u, 17u, 18u, 16u, 18u, 19u,
+                        20u, 22u, 21u, 20u, 23u, 22u,
+                    },
+                .material_name = material_name,
+                .transform =
+                    plugin::Transform{
+                        .position = box.center,
+                        .scale    = box.half_extent,
+                    },
+            };
+        }
+
         struct SmokeStats final {
             field::ScalarFieldStats density{};
             field::ScalarFieldStats temperature{};
@@ -260,6 +359,7 @@ namespace kfs::project {
     struct Project::State final {
         OpenOptions open{};
         DebugOptions debug{};
+        ScenePreset preset{ScenePreset::obstacle_gallery};
         std::shared_ptr<plugin::HostServices> host_services{};
         ExternalGpuBuffer density_buffer{};
         std::unique_ptr<solver::Solver> smoke{};
@@ -271,6 +371,7 @@ namespace kfs::project {
         std::uint64_t scene_revision{1u};
         std::uint64_t exported_density_revision{};
         std::uint64_t exported_density_byte_size{};
+        double simulation_time_seconds{};
         bool density_external_ready{};
         bool host_update_running{};
     };
@@ -372,6 +473,52 @@ namespace kfs::project {
     }
 
     namespace {
+        void apply_scene_preset(Project::State& state, const double simulation_time_seconds) {
+            if (state.smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
+            std::vector<collider::Collider>& colliders = state.smoke->colliders.items;
+            colliders.clear();
+            const std::array size = domain_size(*state.smoke);
+            switch (state.preset) {
+            case ScenePreset::free_plume:
+                return;
+            case ScenePreset::obstacle_gallery:
+                colliders.push_back(collider::Collider{
+                    .shape = geometry::Box{
+                        .center      = {size[0] * 0.50f, size[1] * 0.40f, size[2] * 0.50f},
+                        .half_extent = {size[0] * 0.075f, size[1] * 0.18f, size[2] * 0.34f},
+                    },
+                    .constraint_scalar = 0.0f,
+                });
+                colliders.push_back(collider::Collider{
+                    .shape = geometry::Ellipsoid{
+                        .center = {size[0] * 0.68f, size[1] * 0.34f, size[2] * 0.52f},
+                        .radius = {size[0] * 0.10f, size[1] * 0.08f, size[2] * 0.18f},
+                    },
+                    .constraint_scalar = 0.0f,
+                });
+                return;
+            case ScenePreset::moving_gate: {
+                constexpr float angular_speed = 1.4f;
+                const float phase             = static_cast<float>(simulation_time_seconds) * angular_speed;
+                colliders.push_back(collider::Collider{
+                    .shape = geometry::Box{
+                        .center =
+                            {
+                                size[0] * (0.50f + 0.24f * std::sin(phase)),
+                                size[1] * 0.38f,
+                                size[2] * 0.50f,
+                            },
+                        .half_extent = {size[0] * 0.07f, size[1] * 0.18f, size[2] * 0.34f},
+                    },
+                    .velocity          = {size[0] * 0.24f * angular_speed * std::cos(phase), 0.0f, 0.0f},
+                    .constraint_scalar = 0.0f,
+                });
+                return;
+            }
+            }
+            throw std::runtime_error{"scene preset is invalid."};
+        }
+
         void rebuild_debug_attachments(Project::State& state) {
             state.debug_attachments.viewport_segment_sets.clear();
             if (state.domain_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.domain_segments);
@@ -451,6 +598,20 @@ namespace kfs::project {
             state.exported_density_byte_size = byte_size;
             return true;
         }
+
+        void append_scene_geometry(plugin::Document& document, const solver::Solver& smoke) {
+            document.spheres.push_back(ellipsoid_entity(emitter_entity_name, smoke.emitter.source.region, emitter_material_name));
+            for (std::size_t index = 0u; index < smoke.colliders.items.size(); ++index) {
+                const collider::Collider& item = smoke.colliders.items[index];
+                if (const geometry::Ellipsoid* const ellipsoid = std::get_if<geometry::Ellipsoid>(&item.shape); ellipsoid != nullptr) {
+                    document.spheres.push_back(ellipsoid_entity(std::format("Keyframe Collider Ellipsoid {}", index + 1u), *ellipsoid, collider_sphere_material_name));
+                    continue;
+                }
+                if (const geometry::Box* const box = std::get_if<geometry::Box>(&item.shape); box != nullptr) {
+                    document.meshes.push_back(box_entity(std::format("Keyframe Collider Box {}", index + 1u), *box, collider_box_material_name));
+                }
+            }
+        }
     } // namespace
 
     Project::Project(std::unique_ptr<State> state) : state(std::move(state)) {}
@@ -465,12 +626,16 @@ namespace kfs::project {
             .open_action_label = "Open Smoke Solver",
             .sections =
                 {
+                    plugin::section(section_scene_id, "Scene"),
                     plugin::section(section_simulation_id, "Simulation"),
                     plugin::section(section_view_id, "View"),
                     plugin::section(section_statistics_id, "Statistics"),
                 },
             .open_options =
                 {
+                    plugin::choice(option_scene_key, "Scene", {scene_free_plume, scene_obstacle_gallery, scene_moving_gate})
+                            .defaulted(scene_obstacle_gallery)
+                            .section(section_scene_id),
                     plugin::unsigned_integer("resolution_x", "Resolution X", 64u).section(section_simulation_id),
                     plugin::unsigned_integer("resolution_y", "Resolution Y", 96u).section(section_simulation_id),
                     plugin::unsigned_integer("resolution_z", "Resolution Z", 64u).section(section_simulation_id),
@@ -484,6 +649,7 @@ namespace kfs::project {
                     plugin::toggle(setting_show_volume_key, "Show Volume", true, &Project::set_show_volume).section(section_view_id),
                     plugin::float_value(setting_density_scale_key, "Density Scale", default_density_scale, &Project::set_density_scale).section(section_view_id).slider(0.001f, 16.0f, 0.001f),
                     plugin::toggle(setting_show_domain_key, "Show Domain", true, &Project::set_show_domain).section(section_view_id),
+                    plugin::toggle(setting_show_scene_geometry_key, "Show Scene Geometry", true, &Project::set_show_scene_geometry).section(section_view_id),
                 },
         };
         return definition;
@@ -493,10 +659,12 @@ namespace kfs::project {
         OpenOptions options  = parse_open_options(std::span<const plugin::Option>{context.options});
         auto state           = std::make_unique<State>();
         state->open          = options;
+        state->preset        = options.preset;
         state->debug         = DebugOptions{.density_scale = options.density_scale};
         state->host_services = std::move(context.host_services);
         state->smoke         = std::make_unique<solver::Solver>(options.resolution);
         state->smoke->vorticity.confinement = options.vorticity_confinement;
+        apply_scene_preset(*state, state->simulation_time_seconds);
         publish_domain_if_ready(*state);
         state->latest_smoke_stats = SmokeStats{
             .density     = field::stats(state->smoke->stream, state->smoke->device.density_data),
@@ -513,11 +681,15 @@ namespace kfs::project {
         if (update.update_delta_seconds == 0.0) return;
 
         prepare_density_external_buffer(*this->state);
+        const double step_seconds = static_cast<double>(this->state->open.delta_seconds) * static_cast<double>(this->state->open.steps_per_update);
+        const double next_simulation_time_seconds = this->state->simulation_time_seconds + step_seconds;
+        apply_scene_preset(*this->state, next_simulation_time_seconds);
         const std::expected<solver::StepStats, std::string> stats = this->state->smoke->step(solver::StepRequest{
             .delta_seconds = this->state->open.delta_seconds,
             .iterations    = this->state->open.steps_per_update,
         });
         if (!stats) throw std::runtime_error{stats.error()};
+        this->state->simulation_time_seconds = next_simulation_time_seconds;
         this->state->latest_step_stats  = *stats;
         this->state->latest_smoke_stats = SmokeStats{
             .density     = field::stats(this->state->smoke->stream, this->state->smoke->device.density_data),
@@ -535,24 +707,45 @@ namespace kfs::project {
 
     void Project::write_document(plugin::SceneBuilder& scene) const {
         if (this->state == nullptr || this->state->smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
-        std::vector<plugin::Material> materials{};
-        std::vector<plugin::Light> lights{};
-        if (this->state->debug.show_volume) {
-            materials.push_back(plugin::Material{
+        std::vector<plugin::Material> materials{
+            plugin::Material{
                 .name                 = density_material_name,
                 .model                = "volume",
                 .alpha_mode           = "blend",
                 .base_color           = {1.0f, 1.0f, 1.0f, 1.0f},
                 .roughness            = 0.35f,
                 .volume_density_scale = this->state->debug.density_scale,
-            });
-            lights.push_back(plugin::Light{
+            },
+            plugin::Material{
+                .name       = emitter_material_name,
+                .model      = "unlit_surface",
+                .alpha_mode = "blend",
+                .base_color = {1.0f, 0.48f, 0.18f, 0.34f},
+                .roughness  = 0.25f,
+            },
+            plugin::Material{
+                .name       = collider_box_material_name,
+                .model      = "lit_surface",
+                .alpha_mode = "blend",
+                .base_color = {0.10f, 0.72f, 1.0f, 0.42f},
+                .roughness  = 0.48f,
+            },
+            plugin::Material{
+                .name       = collider_sphere_material_name,
+                .model      = "lit_surface",
+                .alpha_mode = "blend",
+                .base_color = {0.72f, 0.30f, 1.0f, 0.42f},
+                .roughness  = 0.48f,
+            },
+        };
+        std::vector<plugin::Light> lights{
+            plugin::Light{
                 .name      = density_light_name,
                 .kind      = "directional",
                 .color     = {1.0f, 1.0f, 1.0f},
                 .intensity = 3.0f,
-            });
-        }
+            },
+        };
 
         const std::array size = domain_size(*this->state->smoke);
         scene.set_document(plugin::Document{
@@ -592,6 +785,7 @@ namespace kfs::project {
             .debug_attachments = this->state->debug_attachments,
         };
         if (this->state->debug.show_volume && this->state->density_volume.has_value()) document.volumes.push_back(*this->state->density_volume);
+        if (this->state->debug.show_scene_geometry) append_scene_geometry(document, *this->state->smoke);
         scene.set_document(std::move(document));
     }
 
@@ -599,6 +793,10 @@ namespace kfs::project {
         if (this->state == nullptr || this->state->smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
         controls.phase(this->state->host_update_running ? "Running" : "Paused").headline(this->state->latest_step_stats.has_value() ? "Smoke simulation running" : "Smoke solver loaded").message(this->state->latest_step_stats.has_value() ? "Keyframe smoke advances on Spectra update ticks." : "Update clock is paused before the first simulation step.");
         const auto& resolution = this->state->smoke->device.density_data.resolution;
+        controls.metric("scene", "Scene", scene_preset_name(this->state->preset)).section(section_scene_id).display_primary().color({1.0f, 0.58f, 0.20f, 1.0f});
+        controls.metric("colliders", "Colliders", this->state->smoke->colliders.items.size()).section(section_scene_id);
+        controls.metric("scene_geometry", "Scene Geometry", this->state->debug.show_scene_geometry ? "visible" : "hidden").section(section_scene_id);
+        controls.metric("simulation_time", "Simulation Time", std::format("{:.3f}", this->state->simulation_time_seconds)).section(section_scene_id);
         controls.metric("resolution", "Resolution", std::format("{} x {} x {}", resolution[0], resolution[1], resolution[2])).section(section_simulation_id).display_primary().color({0.55f, 0.85f, 1.0f, 1.0f});
         controls.metric("cell_size", "Cell Size", std::format("{:.6f}", this->state->smoke->cell_size)).section(section_simulation_id);
         controls.metric("dt", "Delta Seconds", std::format("{:.6f}", this->state->open.delta_seconds)).section(section_simulation_id);
@@ -646,6 +844,13 @@ namespace kfs::project {
         if (this->state->debug.show_domain == value) return;
         this->state->debug.show_domain = value;
         publish_domain_if_ready(*this->state);
+        ++this->state->scene_revision;
+    }
+
+    void Project::set_show_scene_geometry(const bool value) {
+        if (this->state == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
+        if (this->state->debug.show_scene_geometry == value) return;
+        this->state->debug.show_scene_geometry = value;
         ++this->state->scene_revision;
     }
 } // namespace kfs::project

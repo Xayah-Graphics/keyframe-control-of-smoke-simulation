@@ -5,6 +5,7 @@ export module keyframe.solver;
 import std;
 export import keyframe.field;
 export import keyframe.boundary;
+export import keyframe.collider;
 export import keyframe.operators.advection;
 export import keyframe.operators.emitter;
 export import keyframe.operators.projection;
@@ -77,6 +78,7 @@ namespace kfs::solver {
         boundary::VectorBoundary3D velocity_boundary{};
         boundary::ScalarBoundary3D density_boundary{};
         boundary::ScalarBoundary3D temperature_boundary{};
+        collider::ColliderSet colliders{};
         std::uint32_t current_step{0u};
         struct DeviceData final {
             field::ScalarField3D density_data{{0, 0, 0}};
@@ -84,12 +86,12 @@ namespace kfs::solver {
             field::ScalarField3D temperature_data{{0, 0, 0}};
             field::ScalarField3D temperature_temp{{0, 0, 0}};
             field::CenteredVectorField3D force{{0, 0, 0}};
-            field::CenteredVectorField3D solid_velocity{{0, 0, 0}};
+            field::CenteredVectorField3D constraint_velocity{{0, 0, 0}};
             field::StaggeredVectorField3D velocity{{0, 0, 0}};
             field::StaggeredVectorField3D temp_velocity{{0, 0, 0}};
             field::CenteredVectorField3D centered_velocity{{0, 0, 0}};
-            field::ScalarField3D solid_temperature{{0, 0, 0}};
-            field::IndexedField3D occupancy{{0, 0, 0}};
+            field::ScalarField3D constraint_scalar{{0, 0, 0}};
+            field::IndexedField3D cell_indices{{0, 0, 0}};
         } device{};
         operators::Advection advection;
         operators::Emitter emitter;

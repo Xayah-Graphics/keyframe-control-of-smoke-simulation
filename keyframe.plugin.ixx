@@ -283,6 +283,26 @@ export namespace kfs::plugin {
         float intensity{1.0f};
     };
 
+    struct MeshVertex {
+        std::array<float, 3u> position{};
+        std::array<float, 3u> normal{0.0f, 1.0f, 0.0f};
+    };
+
+    struct Mesh {
+        std::string name{};
+        std::vector<MeshVertex> vertices{};
+        std::vector<std::uint32_t> indices{};
+        std::string material_name{};
+        Transform transform{};
+    };
+
+    struct Sphere {
+        std::string name{};
+        float radius{1.0f};
+        std::string material_name{};
+        Transform transform{};
+    };
+
     enum class PointCloudSourceKind : std::uint32_t {
         Values            = 0u,
         ExternalGpuBuffer = 1u,
@@ -449,6 +469,8 @@ export namespace kfs::plugin {
         std::vector<Camera> cameras{};
         std::vector<Material> materials{};
         std::vector<Light> lights{};
+        std::vector<Mesh> meshes{};
+        std::vector<Sphere> spheres{};
         std::vector<PointCloud> point_clouds{};
         std::vector<VolumeGrid> volumes{};
         DebugAttachmentSet debug_attachments{};
@@ -1330,6 +1352,10 @@ namespace kfs::plugin {
             Document document{};
             std::vector<SpectraSceneMaterial> material_views{};
             std::vector<SpectraSceneLight> light_views{};
+            std::vector<std::vector<SpectraSceneMeshVertex>> mesh_vertex_storage{};
+            std::vector<std::vector<std::uint32_t>> mesh_index_storage{};
+            std::vector<SpectraSceneMesh> mesh_views{};
+            std::vector<SpectraSceneSphere> sphere_views{};
             std::vector<std::vector<SpectraScenePoint>> point_storage{};
             std::vector<SpectraScenePointCloud> point_cloud_views{};
             std::vector<std::vector<SpectraSceneVolumeChannel>> volume_channel_storage{};
@@ -1514,6 +1540,46 @@ namespace kfs::plugin {
             };
             copy_array(view.color, light.color);
             return view;
+        }
+
+        void make_mesh_abi_views(SceneAbiStorage& cache, const std::vector<Mesh>& meshes) {
+            cache.mesh_vertex_storage.clear();
+            cache.mesh_index_storage.clear();
+            cache.mesh_views.clear();
+            cache.mesh_vertex_storage.resize(meshes.size());
+            cache.mesh_index_storage.resize(meshes.size());
+            cache.mesh_views.reserve(meshes.size());
+            for (std::size_t mesh_index = 0u; mesh_index < meshes.size(); ++mesh_index) {
+                const Mesh& mesh = meshes[mesh_index];
+                cache.mesh_vertex_storage[mesh_index].reserve(mesh.vertices.size());
+                for (const MeshVertex& vertex : mesh.vertices) {
+                    SpectraSceneMeshVertex vertex_view{};
+                    copy_array(vertex_view.position, vertex.position);
+                    copy_array(vertex_view.normal, vertex.normal);
+                    cache.mesh_vertex_storage[mesh_index].push_back(vertex_view);
+                }
+                cache.mesh_index_storage[mesh_index] = mesh.indices;
+                cache.mesh_views.push_back(SpectraSceneMesh{
+                    .name          = mesh.name.c_str(),
+                    .vertices      = SpectraSceneMeshVertexSpan{.data = cache.mesh_vertex_storage[mesh_index].empty() ? nullptr : cache.mesh_vertex_storage[mesh_index].data(), .count = static_cast<std::uint64_t>(cache.mesh_vertex_storage[mesh_index].size())},
+                    .indices       = SpectraSceneUInt32Span{.data = cache.mesh_index_storage[mesh_index].empty() ? nullptr : cache.mesh_index_storage[mesh_index].data(), .count = static_cast<std::uint64_t>(cache.mesh_index_storage[mesh_index].size())},
+                    .material_name = mesh.material_name.c_str(),
+                    .transform     = make_transform_view(mesh.transform),
+                });
+            }
+        }
+
+        void make_sphere_abi_views(SceneAbiStorage& cache, const std::vector<Sphere>& spheres) {
+            cache.sphere_views.clear();
+            cache.sphere_views.reserve(spheres.size());
+            for (const Sphere& sphere : spheres) {
+                cache.sphere_views.push_back(SpectraSceneSphere{
+                    .name          = sphere.name.c_str(),
+                    .radius        = sphere.radius,
+                    .material_name = sphere.material_name.c_str(),
+                    .transform     = make_transform_view(sphere.transform),
+                });
+            }
         }
 
         void make_point_cloud_abi_views(SceneAbiStorage& cache, const std::vector<PointCloud>& point_clouds) {
@@ -1734,6 +1800,8 @@ namespace kfs::plugin {
             cache.light_views.clear();
             cache.light_views.reserve(cache.document.lights.size());
             for (const Light& light : cache.document.lights) cache.light_views.push_back(make_light_view(light));
+            make_mesh_abi_views(cache, cache.document.meshes);
+            make_sphere_abi_views(cache, cache.document.spheres);
             make_point_cloud_abi_views(cache, cache.document.point_clouds);
             make_volume_abi_views(cache, cache.document.volumes);
             cache.camera_views.clear();
@@ -1754,6 +1822,8 @@ namespace kfs::plugin {
                         .materials             = SpectraSceneMaterialSpan{.data = cache.material_views.empty() ? nullptr : cache.material_views.data(), .count = static_cast<std::uint64_t>(cache.material_views.size())},
                         .lights                = SpectraSceneLightSpan{.data = cache.light_views.empty() ? nullptr : cache.light_views.data(), .count = static_cast<std::uint64_t>(cache.light_views.size())},
                         .cameras               = SpectraSceneCameraSpan{.data = cache.camera_views.empty() ? nullptr : cache.camera_views.data(), .count = static_cast<std::uint64_t>(cache.camera_views.size())},
+                        .meshes                = SpectraSceneMeshSpan{.data = cache.mesh_views.empty() ? nullptr : cache.mesh_views.data(), .count = static_cast<std::uint64_t>(cache.mesh_views.size())},
+                        .spheres               = SpectraSceneSphereSpan{.data = cache.sphere_views.empty() ? nullptr : cache.sphere_views.data(), .count = static_cast<std::uint64_t>(cache.sphere_views.size())},
                         .point_clouds          = SpectraScenePointCloudSpan{.data = cache.point_cloud_views.empty() ? nullptr : cache.point_cloud_views.data(), .count = static_cast<std::uint64_t>(cache.point_cloud_views.size())},
                         .volumes               = SpectraSceneVolumeSpan{.data = cache.volume_views.empty() ? nullptr : cache.volume_views.data(), .count = static_cast<std::uint64_t>(cache.volume_views.size())},
                         .viewport_segment_sets = SpectraSceneViewportSegmentSetSpan{.data = cache.segment_set_views.empty() ? nullptr : cache.segment_set_views.data(), .count = static_cast<std::uint64_t>(cache.segment_set_views.size())},
@@ -1763,6 +1833,8 @@ namespace kfs::plugin {
         }
 
         [[nodiscard]] SpectraSceneFrameView make_frame_abi_view(SceneAbiStorage& cache) {
+            make_mesh_abi_views(cache, cache.document.meshes);
+            make_sphere_abi_views(cache, cache.document.spheres);
             make_point_cloud_abi_views(cache, cache.document.point_clouds);
             make_volume_abi_views(cache, cache.document.volumes);
             cache.camera_views.clear();
@@ -1777,6 +1849,8 @@ namespace kfs::plugin {
                 .items =
                     SpectraSceneItems{
                         .cameras               = SpectraSceneCameraSpan{.data = cache.camera_views.empty() ? nullptr : cache.camera_views.data(), .count = static_cast<std::uint64_t>(cache.camera_views.size())},
+                        .meshes                = SpectraSceneMeshSpan{.data = cache.mesh_views.empty() ? nullptr : cache.mesh_views.data(), .count = static_cast<std::uint64_t>(cache.mesh_views.size())},
+                        .spheres               = SpectraSceneSphereSpan{.data = cache.sphere_views.empty() ? nullptr : cache.sphere_views.data(), .count = static_cast<std::uint64_t>(cache.sphere_views.size())},
                         .point_clouds          = SpectraScenePointCloudSpan{.data = cache.point_cloud_views.empty() ? nullptr : cache.point_cloud_views.data(), .count = static_cast<std::uint64_t>(cache.point_cloud_views.size())},
                         .volumes               = SpectraSceneVolumeSpan{.data = cache.volume_views.empty() ? nullptr : cache.volume_views.data(), .count = static_cast<std::uint64_t>(cache.volume_views.size())},
                         .viewport_segment_sets = SpectraSceneViewportSegmentSetSpan{.data = cache.segment_set_views.empty() ? nullptr : cache.segment_set_views.data(), .count = static_cast<std::uint64_t>(cache.segment_set_views.size())},

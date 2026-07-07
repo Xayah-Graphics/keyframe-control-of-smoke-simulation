@@ -26,6 +26,7 @@ export namespace kfs::project {
         void set_show_volume(bool value);
         void set_density_scale(float value);
         void set_show_domain(bool value);
+        void set_show_scene_geometry(bool value);
 
     private:
         explicit Project(std::unique_ptr<State> state);
