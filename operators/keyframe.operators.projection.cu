@@ -131,7 +131,7 @@ namespace kfs::cuda::operators::projection {
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i > nx || j >= ny || k >= nz) return;
 
-        auto& face = velocity_x[field::index(0u, i, j, k, nx, ny)];
+        auto& face              = velocity_x[field::index(0u, i, j, k, nx, ny)];
         int left_x              = i - 1;
         int left_y              = j;
         int left_z              = k;
@@ -169,7 +169,7 @@ namespace kfs::cuda::operators::projection {
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j > ny || k >= nz) return;
 
-        auto& face = velocity_y[field::index(1u, i, j, k, nx, ny)];
+        auto& face             = velocity_y[field::index(1u, i, j, k, nx, ny)];
         int down_x             = i;
         int down_y             = j - 1;
         int down_z             = k;
@@ -207,7 +207,7 @@ namespace kfs::cuda::operators::projection {
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j >= ny || k > nz) return;
 
-        auto& face = velocity_z[field::index(2u, i, j, k, nx, ny)];
+        auto& face              = velocity_z[field::index(2u, i, j, k, nx, ny)];
         int back_x              = i;
         int back_y              = j;
         int back_z              = k - 1;
@@ -253,18 +253,18 @@ namespace kfs::cuda::operators::projection {
 
     void compute_pressure_rhs(cudaStream_t stream, float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* pressure_boundary_modes, const float* pressure_boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                                      = field::centered_grid(nx, ny, nz, block);
-        const boundary::ScalarBoundary3D pressure_boundary   = boundary::make_scalar_boundary(pressure_boundary_modes, pressure_boundary_values);
+        const dim3 grid                                    = field::centered_grid(nx, ny, nz, block);
+        const boundary::ScalarBoundary3D pressure_boundary = boundary::make_scalar_boundary(pressure_boundary_modes, pressure_boundary_values);
         compute_pressure_rhs_kernel<<<grid, block, 0, stream>>>(rhs, velocity_x, velocity_y, velocity_z, cell_indices, pressure_anchor, nx, ny, nz, h, dt, pressure_boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_pressure_rhs_kernel: "} + cudaGetErrorString(status)};
     }
 
     void build_pressure_matrix(cudaStream_t stream, float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const std::uint32_t* pressure_boundary_modes) {
-        const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        constexpr unsigned block                             = 256u;
-        const unsigned grid                                  = field::ceil_div_u32(count, block);
+        const auto count         = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
+        constexpr unsigned block = 256u;
+        const unsigned grid      = field::ceil_div_u32(count, block);
         constexpr float zero_values[6]{};
-        const boundary::ScalarBoundary3D pressure_boundary   = boundary::make_scalar_boundary(pressure_boundary_modes, zero_values);
+        const boundary::ScalarBoundary3D pressure_boundary = boundary::make_scalar_boundary(pressure_boundary_modes, zero_values);
         build_pressure_matrix_kernel<<<grid, block, 0, stream>>>(values, row_offsets, column_indices, cell_indices, pressure_anchor, nx, ny, nz, pressure_boundary);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"build_pressure_matrix_kernel: "} + cudaGetErrorString(status)};
     }
@@ -281,8 +281,8 @@ namespace kfs::cuda::operators::projection {
 
     void project_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* velocity_boundary_modes, const float* velocity_boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                                      = field::staggered_grid(axis, nx, ny, nz, block);
-        const boundary::VectorBoundary3D boundary_config     = boundary::make_vector_boundary(velocity_boundary_modes, velocity_boundary_values);
+        const dim3 grid                                  = field::staggered_grid(axis, nx, ny, nz, block);
+        const boundary::VectorBoundary3D boundary_config = boundary::make_vector_boundary(velocity_boundary_modes, velocity_boundary_values);
         if (axis == 0u) project_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 1u) project_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 2u) project_velocity_z_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);

@@ -16,12 +16,6 @@ export namespace kfs::collider {
     struct ColliderSet final {
         std::vector<Collider> items{};
 
-        void rasterize(
-                cudaStream_t stream,
-                field::IndexedField3D& cell_indices,
-                field::CenteredVectorField3D& constraint_velocity,
-                field::ScalarField3D& constraint_scalar,
-                float cell_size
-        ) const;
+        void rasterize(cudaStream_t stream, field::IndexedField3D& cell_indices, field::CenteredVectorField3D& constraint_velocity, field::ScalarField3D& constraint_scalar, float cell_size) const;
     };
 } // namespace kfs::collider

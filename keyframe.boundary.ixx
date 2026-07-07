@@ -13,10 +13,10 @@ export namespace kfs::boundary {
     };
 
     enum class VectorBoundaryMode : std::uint32_t {
-        fixed_value                           = 0,
-        zero_gradient                         = 1,
-        normal_fixed_tangent_zero_gradient    = 2,
-        periodic                              = 3,
+        fixed_value                        = 0,
+        zero_gradient                      = 1,
+        normal_fixed_tangent_zero_gradient = 2,
+        periodic                           = 3,
     };
 
     struct ScalarBoundaryFace final {

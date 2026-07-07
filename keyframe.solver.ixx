@@ -59,7 +59,7 @@ namespace kfs::solver {
 
     export struct Solver final {
         explicit Solver(std::array<std::uint32_t, 3> resolution = {64, 96, 64}, float cell_size = 0.01875f, SmokeBoundary boundaries = {}, cudaStream_t execution_stream = nullptr);
-        ~Solver() noexcept = default;
+        ~Solver() noexcept                         = default;
         Solver(const Solver& other)                = delete;
         Solver& operator=(const Solver& other)     = delete;
         Solver(Solver&& other) noexcept            = delete;

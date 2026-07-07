@@ -69,16 +69,16 @@ namespace kfs::cuda::operators::vorticity {
 
     void compute_vorticity(cudaStream_t stream, float* omega_x, float* omega_y, float* omega_z, float* omega_magnitude, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                                      = field::centered_grid(nx, ny, nz, block);
-        const boundary::VectorBoundary3D boundary_config     = boundary::make_vector_boundary(boundary_modes, boundary_values);
+        const dim3 grid                                  = field::centered_grid(nx, ny, nz, block);
+        const boundary::VectorBoundary3D boundary_config = boundary::make_vector_boundary(boundary_modes, boundary_values);
         compute_vorticity_kernel<<<grid, block, 0, stream>>>(omega_x, omega_y, omega_z, omega_magnitude, velocity_x, velocity_y, velocity_z, cell_indices, nx, ny, nz, cell_size, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_vorticity_kernel: "} + cudaGetErrorString(status)};
     }
 
     void add_confinement(cudaStream_t stream, float* destination_x, float* destination_y, float* destination_z, const float* omega_x, const float* omega_y, const float* omega_z, const float* omega_magnitude, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const float cell_size, const float confinement, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid                                      = field::centered_grid(nx, ny, nz, block);
-        const boundary::VectorBoundary3D boundary_config     = boundary::make_vector_boundary(boundary_modes, boundary_values);
+        const dim3 grid                                  = field::centered_grid(nx, ny, nz, block);
+        const boundary::VectorBoundary3D boundary_config = boundary::make_vector_boundary(boundary_modes, boundary_values);
         add_confinement_kernel<<<grid, block, 0, stream>>>(destination_x, destination_y, destination_z, omega_x, omega_y, omega_z, omega_magnitude, cell_indices, nx, ny, nz, cell_size, confinement, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_confinement_kernel: "} + cudaGetErrorString(status)};
     }

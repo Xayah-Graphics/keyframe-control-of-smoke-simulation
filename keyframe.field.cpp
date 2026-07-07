@@ -147,7 +147,8 @@ namespace kfs::field {
         std::array<float*, 3> next{};
         try {
             const std::size_t bytes = cell_element_count(resolution) * sizeof(float);
-            for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next[axis]), bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc centered vector field: "} + cudaGetErrorString(status)};
+            for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+                if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next[axis]), bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc centered vector field: "} + cudaGetErrorString(status)};
         } catch (...) {
             cuda::free_device_buffers(next[0], next[1], next[2]);
             throw;
@@ -194,7 +195,8 @@ namespace kfs::field {
 
         std::array<float*, 3> next{};
         try {
-            for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next[axis]), face_element_count(resolution, axis) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc staggered vector field: "} + cudaGetErrorString(status)};
+            for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+                if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next[axis]), face_element_count(resolution, axis) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc staggered vector field: "} + cudaGetErrorString(status)};
         } catch (...) {
             cuda::free_device_buffers(next[0], next[1], next[2]);
             throw;
@@ -233,11 +235,13 @@ namespace kfs::field {
     }
 
     void copy(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source.data[axis], destination.bytes(), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector copy: "} + cudaGetErrorString(status)};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source.data[axis], destination.bytes(), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector copy: "} + cudaGetErrorString(status)};
     }
 
     void copy(const cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source.data[axis], destination.bytes(axis), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector copy: "} + cudaGetErrorString(status)};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source.data[axis], destination.bytes(axis), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector copy: "} + cudaGetErrorString(status)};
     }
 
     void upload(const cudaStream_t stream, ScalarField3D& destination, const std::span<const float> source) {
@@ -249,11 +253,13 @@ namespace kfs::field {
     }
 
     void upload(const cudaStream_t stream, CenteredVectorField3D& destination, const std::array<std::span<const float>, 3> source) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source[axis].data(), destination.bytes(), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector upload: "} + cudaGetErrorString(status)};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source[axis].data(), destination.bytes(), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector upload: "} + cudaGetErrorString(status)};
     }
 
     void upload(const cudaStream_t stream, StaggeredVectorField3D& destination, const std::array<std::span<const float>, 3> source) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source[axis].data(), destination.bytes(axis), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector upload: "} + cudaGetErrorString(status)};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source[axis].data(), destination.bytes(axis), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector upload: "} + cudaGetErrorString(status)};
     }
 
     void download(const cudaStream_t stream, const std::span<float> destination, const ScalarField3D& source) {
@@ -265,11 +271,13 @@ namespace kfs::field {
     }
 
     void download(const cudaStream_t stream, const std::array<std::span<float>, 3> destination, const CenteredVectorField3D& source) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMemcpyAsync(destination[axis].data(), source.data[axis], source.bytes(), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector download: "} + cudaGetErrorString(status)};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (const cudaError_t status = cudaMemcpyAsync(destination[axis].data(), source.data[axis], source.bytes(), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector download: "} + cudaGetErrorString(status)};
     }
 
     void download(const cudaStream_t stream, const std::array<std::span<float>, 3> destination, const StaggeredVectorField3D& source) {
-        for (std::uint32_t axis = 0u; axis < 3u; ++axis) if (const cudaError_t status = cudaMemcpyAsync(destination[axis].data(), source.data[axis], source.bytes(axis), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector download: "} + cudaGetErrorString(status)};
+        for (std::uint32_t axis = 0u; axis < 3u; ++axis)
+            if (const cudaError_t status = cudaMemcpyAsync(destination[axis].data(), source.data[axis], source.bytes(axis), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector download: "} + cudaGetErrorString(status)};
     }
 
     void add(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right) {

@@ -1,10 +1,9 @@
 #ifndef KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_BOUNDARY_CUH
 #define KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_BOUNDARY_CUH
 
+#include "keyframe.field.cuh"
 #include <cstdint>
 #include <cuda_runtime.h>
-
-#include "keyframe.field.cuh"
 
 namespace kfs::cuda::boundary {
     constexpr std::uint32_t scalar_boundary_fixed_value   = 0u;

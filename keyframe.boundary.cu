@@ -1,5 +1,5 @@
-#include "keyframe.boundary.h"
 #include "keyframe.boundary.cuh"
+#include "keyframe.boundary.h"
 #include <stdexcept>
 #include <string>
 
@@ -29,16 +29,16 @@ namespace kfs::cuda::boundary {
                 return;
             }
         }
-        int left_x                = i - 1;
-        int left_y                = j;
-        int left_z                = k;
-        int right_x               = i;
-        int right_y               = j;
-        int right_z               = k;
-        const bool has_left       = resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary);
-        const bool has_right      = resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary);
-        const bool left_marked    = has_left && cell_indices[field::index(left_x, left_y, left_z, nx, ny)] != 0u;
-        const bool right_marked   = has_right && cell_indices[field::index(right_x, right_y, right_z, nx, ny)] != 0u;
+        int left_x              = i - 1;
+        int left_y              = j;
+        int left_z              = k;
+        int right_x             = i;
+        int right_y             = j;
+        int right_z             = k;
+        const bool has_left     = resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary);
+        const bool has_right    = resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary);
+        const bool left_marked  = has_left && cell_indices[field::index(left_x, left_y, left_z, nx, ny)] != 0u;
+        const bool right_marked = has_right && cell_indices[field::index(right_x, right_y, right_z, nx, ny)] != 0u;
         if (!left_marked && !right_marked) return;
 
         float value  = 0.0f;
@@ -79,16 +79,16 @@ namespace kfs::cuda::boundary {
                 return;
             }
         }
-        int min_x              = i;
-        int min_y              = j - 1;
-        int min_z              = k;
-        int max_x              = i;
-        int max_y              = j;
-        int max_z              = k;
-        const bool has_min     = resolve_cell_coordinates(min_x, min_y, min_z, nx, ny, nz, boundary);
-        const bool has_max     = resolve_cell_coordinates(max_x, max_y, max_z, nx, ny, nz, boundary);
-        const bool min_marked  = has_min && cell_indices[field::index(min_x, min_y, min_z, nx, ny)] != 0u;
-        const bool max_marked  = has_max && cell_indices[field::index(max_x, max_y, max_z, nx, ny)] != 0u;
+        int min_x             = i;
+        int min_y             = j - 1;
+        int min_z             = k;
+        int max_x             = i;
+        int max_y             = j;
+        int max_z             = k;
+        const bool has_min    = resolve_cell_coordinates(min_x, min_y, min_z, nx, ny, nz, boundary);
+        const bool has_max    = resolve_cell_coordinates(max_x, max_y, max_z, nx, ny, nz, boundary);
+        const bool min_marked = has_min && cell_indices[field::index(min_x, min_y, min_z, nx, ny)] != 0u;
+        const bool max_marked = has_max && cell_indices[field::index(max_x, max_y, max_z, nx, ny)] != 0u;
         if (!min_marked && !max_marked) return;
 
         float value  = 0.0f;
@@ -129,16 +129,16 @@ namespace kfs::cuda::boundary {
                 return;
             }
         }
-        int min_x              = i;
-        int min_y              = j;
-        int min_z              = k - 1;
-        int max_x              = i;
-        int max_y              = j;
-        int max_z              = k;
-        const bool has_min     = resolve_cell_coordinates(min_x, min_y, min_z, nx, ny, nz, boundary);
-        const bool has_max     = resolve_cell_coordinates(max_x, max_y, max_z, nx, ny, nz, boundary);
-        const bool min_marked  = has_min && cell_indices[field::index(min_x, min_y, min_z, nx, ny)] != 0u;
-        const bool max_marked  = has_max && cell_indices[field::index(max_x, max_y, max_z, nx, ny)] != 0u;
+        int min_x             = i;
+        int min_y             = j;
+        int min_z             = k - 1;
+        int max_x             = i;
+        int max_y             = j;
+        int max_z             = k;
+        const bool has_min    = resolve_cell_coordinates(min_x, min_y, min_z, nx, ny, nz, boundary);
+        const bool has_max    = resolve_cell_coordinates(max_x, max_y, max_z, nx, ny, nz, boundary);
+        const bool min_marked = has_min && cell_indices[field::index(min_x, min_y, min_z, nx, ny)] != 0u;
+        const bool max_marked = has_max && cell_indices[field::index(max_x, max_y, max_z, nx, ny)] != 0u;
         if (!min_marked && !max_marked) return;
 
         float value  = 0.0f;
@@ -226,7 +226,7 @@ namespace kfs::cuda::boundary {
 
     void enforce(cudaStream_t stream, const std::uint32_t axis, float* component, const std::uint32_t* cell_indices, const float* constraint_component, const int nx, const int ny, const int nz, const std::uint32_t* boundary_modes, const float* boundary_values) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid               = field::staggered_grid(axis, nx, ny, nz, block);
+        const dim3 grid                 = field::staggered_grid(axis, nx, ny, nz, block);
         const VectorBoundary3D boundary = make_vector_boundary(boundary_modes, boundary_values);
         if (axis == 0u) enforce_x_kernel<<<grid, block, 0, stream>>>(component, cell_indices, constraint_component, nx, ny, nz, boundary);
         if (axis == 1u) enforce_y_kernel<<<grid, block, 0, stream>>>(component, cell_indices, constraint_component, nx, ny, nz, boundary);

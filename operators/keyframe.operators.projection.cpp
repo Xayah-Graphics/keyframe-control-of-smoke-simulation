@@ -168,12 +168,12 @@ namespace kfs::operators {
     }
 
     void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const boundary::PackedVectorBoundary3D& velocity_boundary, const float delta_seconds) {
-        const std::uint64_t cells64     = cell_count(this->resolution);
-        const int cells                 = static_cast<int>(cells64);
-        const std::size_t bytes         = cell_bytes(this->resolution);
-        const int nx                    = this->resolution[0];
-        const int ny                    = this->resolution[1];
-        const int nz                    = this->resolution[2];
+        const std::uint64_t cells64                  = cell_count(this->resolution);
+        const int cells                              = static_cast<int>(cells64);
+        const std::size_t bytes                      = cell_bytes(this->resolution);
+        const int nx                                 = this->resolution[0];
+        const int ny                                 = this->resolution[1];
+        const int nz                                 = this->resolution[2];
         const std::uint32_t* velocity_boundary_modes = velocity_boundary.modes.data();
         const float* velocity_boundary_values        = velocity_boundary.values.data();
         const std::uint32_t* pressure_boundary_modes = this->pressure_boundary.modes.data();

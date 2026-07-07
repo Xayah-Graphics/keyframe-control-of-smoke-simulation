@@ -13,19 +13,7 @@ import keyframe.operators.projection;
 import keyframe.operators.vorticity;
 
 namespace kfs::solver {
-    Solver::Solver(const std::array<std::uint32_t, 3> resolution, const float cell_size, const SmokeBoundary boundaries, cudaStream_t execution_stream) :
-        resolution{static_cast<std::int32_t>(resolution[0]), static_cast<std::int32_t>(resolution[1]), static_cast<std::int32_t>(resolution[2])},
-        cell_size{cell_size},
-        pressure_boundary{boundaries.pressure},
-        stream{execution_stream},
-        velocity_boundary{boundaries.velocity},
-        density_boundary{boundaries.density},
-        temperature_boundary{boundaries.temperature},
-        device{},
-        advection{this->stream, this->cell_size, operators::Advection::Scheme::monotonic_cubic},
-        emitter{this->stream, this->resolution, this->cell_size, operators::Emitter::Source{}},
-        projection{this->stream, this->resolution, this->cell_size, boundary::pack(this->pressure_boundary), 64},
-        vorticity{this->stream, this->resolution, this->cell_size, 0.22f} {
+    Solver::Solver(const std::array<std::uint32_t, 3> resolution, const float cell_size, const SmokeBoundary boundaries, cudaStream_t execution_stream) : resolution{static_cast<std::int32_t>(resolution[0]), static_cast<std::int32_t>(resolution[1]), static_cast<std::int32_t>(resolution[2])}, cell_size{cell_size}, pressure_boundary{boundaries.pressure}, stream{execution_stream}, velocity_boundary{boundaries.velocity}, density_boundary{boundaries.density}, temperature_boundary{boundaries.temperature}, device{}, advection{this->stream, this->cell_size, operators::Advection::Scheme::monotonic_cubic}, emitter{this->stream, this->resolution, this->cell_size, operators::Emitter::Source{}}, projection{this->stream, this->resolution, this->cell_size, boundary::pack(this->pressure_boundary), 64}, vorticity{this->stream, this->resolution, this->cell_size, 0.22f} {
         this->device.density_data.resize(this->resolution);
         this->device.density_temp.resize(this->resolution);
         this->device.temperature_data.resize(this->resolution);

@@ -5,28 +5,7 @@
 #include <string>
 
 namespace {
-    __global__ void rasterize_ellipsoid_kernel(
-            std::uint32_t* cell_indices,
-            float* velocity_x,
-            float* velocity_y,
-            float* velocity_z,
-            float* scalar,
-            const int nx,
-            const int ny,
-            const int nz,
-            const float cell_size,
-            const std::uint32_t tag,
-            const float center_x,
-            const float center_y,
-            const float center_z,
-            const float radius_x,
-            const float radius_y,
-            const float radius_z,
-            const float constraint_velocity_x,
-            const float constraint_velocity_y,
-            const float constraint_velocity_z,
-            const float scalar_value
-    ) {
+    __global__ void rasterize_ellipsoid_kernel(std::uint32_t* cell_indices, float* velocity_x, float* velocity_y, float* velocity_z, float* scalar, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t tag, const float center_x, const float center_y, const float center_z, const float radius_x, const float radius_y, const float radius_z, const float constraint_velocity_x, const float constraint_velocity_y, const float constraint_velocity_z, const float scalar_value) {
         const auto index               = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
         if (index >= cell_count) return;
@@ -50,28 +29,7 @@ namespace {
         scalar[index]       = scalar_value;
     }
 
-    __global__ void rasterize_box_kernel(
-            std::uint32_t* cell_indices,
-            float* velocity_x,
-            float* velocity_y,
-            float* velocity_z,
-            float* scalar,
-            const int nx,
-            const int ny,
-            const int nz,
-            const float cell_size,
-            const std::uint32_t tag,
-            const float center_x,
-            const float center_y,
-            const float center_z,
-            const float half_extent_x,
-            const float half_extent_y,
-            const float half_extent_z,
-            const float constraint_velocity_x,
-            const float constraint_velocity_y,
-            const float constraint_velocity_z,
-            const float scalar_value
-    ) {
+    __global__ void rasterize_box_kernel(std::uint32_t* cell_indices, float* velocity_x, float* velocity_y, float* velocity_z, float* scalar, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t tag, const float center_x, const float center_y, const float center_z, const float half_extent_x, const float half_extent_y, const float half_extent_z, const float constraint_velocity_x, const float constraint_velocity_y, const float constraint_velocity_z, const float scalar_value) {
         const auto index               = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
         if (index >= cell_count) return;
@@ -94,91 +52,17 @@ namespace {
 } // namespace
 
 namespace kfs::cuda::collider {
-    void rasterize_ellipsoid(
-            cudaStream_t stream,
-            std::uint32_t* cell_indices,
-            float* velocity_x,
-            float* velocity_y,
-            float* velocity_z,
-            float* scalar,
-            const int nx,
-            const int ny,
-            const int nz,
-            const float cell_size,
-            const std::uint32_t tag,
-            const std::array<float, 3> center,
-            const std::array<float, 3> radius,
-            const std::array<float, 3> velocity,
-            const float scalar_value
-    ) {
+    void rasterize_ellipsoid(cudaStream_t stream, std::uint32_t* cell_indices, float* velocity_x, float* velocity_y, float* velocity_z, float* scalar, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t tag, const std::array<float, 3> center, const std::array<float, 3> radius, const std::array<float, 3> velocity, const float scalar_value) {
         constexpr std::uint32_t block  = 256u;
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        rasterize_ellipsoid_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(
-                cell_indices,
-                velocity_x,
-                velocity_y,
-                velocity_z,
-                scalar,
-                nx,
-                ny,
-                nz,
-                cell_size,
-                tag,
-                center[0],
-                center[1],
-                center[2],
-                radius[0],
-                radius[1],
-                radius[2],
-                velocity[0],
-                velocity[1],
-                velocity[2],
-                scalar_value
-        );
+        rasterize_ellipsoid_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(cell_indices, velocity_x, velocity_y, velocity_z, scalar, nx, ny, nz, cell_size, tag, center[0], center[1], center[2], radius[0], radius[1], radius[2], velocity[0], velocity[1], velocity[2], scalar_value);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"rasterize_ellipsoid_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void rasterize_box(
-            cudaStream_t stream,
-            std::uint32_t* cell_indices,
-            float* velocity_x,
-            float* velocity_y,
-            float* velocity_z,
-            float* scalar,
-            const int nx,
-            const int ny,
-            const int nz,
-            const float cell_size,
-            const std::uint32_t tag,
-            const std::array<float, 3> center,
-            const std::array<float, 3> half_extent,
-            const std::array<float, 3> velocity,
-            const float scalar_value
-    ) {
+    void rasterize_box(cudaStream_t stream, std::uint32_t* cell_indices, float* velocity_x, float* velocity_y, float* velocity_z, float* scalar, const int nx, const int ny, const int nz, const float cell_size, const std::uint32_t tag, const std::array<float, 3> center, const std::array<float, 3> half_extent, const std::array<float, 3> velocity, const float scalar_value) {
         constexpr std::uint32_t block  = 256u;
         const std::uint64_t cell_count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        rasterize_box_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(
-                cell_indices,
-                velocity_x,
-                velocity_y,
-                velocity_z,
-                scalar,
-                nx,
-                ny,
-                nz,
-                cell_size,
-                tag,
-                center[0],
-                center[1],
-                center[2],
-                half_extent[0],
-                half_extent[1],
-                half_extent[2],
-                velocity[0],
-                velocity[1],
-                velocity[2],
-                scalar_value
-        );
+        rasterize_box_kernel<<<field::ceil_div_u32(cell_count, block), block, 0, stream>>>(cell_indices, velocity_x, velocity_y, velocity_z, scalar, nx, ny, nz, cell_size, tag, center[0], center[1], center[2], half_extent[0], half_extent[1], half_extent[2], velocity[0], velocity[1], velocity[2], scalar_value);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"rasterize_box_kernel: "} + cudaGetErrorString(status)};
     }
 } // namespace kfs::cuda::collider
