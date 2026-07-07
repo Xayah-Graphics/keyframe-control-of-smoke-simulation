@@ -7,7 +7,6 @@ export import keyframe.field;
 export import keyframe.boundary;
 export import keyframe.operators.advection;
 export import keyframe.operators.emitter;
-import keyframe.operators.scalar_force;
 import keyframe.operators.projection;
 import keyframe.operators.vorticity;
 
@@ -79,7 +78,6 @@ namespace kfs::solver {
     private:
         std::optional<operators::Advection> advection{};
         std::optional<operators::Emitter> emitter{};
-        std::optional<operators::ScalarForce> scalar_force{};
         std::optional<operators::Projection> projection{};
         std::optional<operators::Vorticity> vorticity{};
     };

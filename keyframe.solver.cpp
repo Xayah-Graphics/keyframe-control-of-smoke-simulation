@@ -8,7 +8,6 @@ import keyframe.field;
 import keyframe.boundary;
 import keyframe.operators.advection;
 import keyframe.operators.emitter;
-import keyframe.operators.scalar_force;
 import keyframe.operators.projection;
 import keyframe.operators.vorticity;
 
@@ -108,13 +107,11 @@ namespace kfs::solver {
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
             this->emitter.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.emitter);
-            this->scalar_force.emplace(this->host.stream, this->host.boundary.flow);
             this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
             this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.flow);
         } catch (...) {
             this->vorticity.reset();
             this->projection.reset();
-            this->scalar_force.reset();
             this->emitter.reset();
             this->advection.reset();
             destroy_device(*this);
@@ -125,7 +122,6 @@ namespace kfs::solver {
     Solver::~Solver() noexcept {
         this->vorticity.reset();
         this->projection.reset();
-        this->scalar_force.reset();
         this->emitter.reset();
         this->advection.reset();
         destroy_device(*this);
@@ -145,8 +141,8 @@ namespace kfs::solver {
                     field::copy_masked(host.stream, device.temperature_data, device.solid_temperature, device.occupancy);
                     field::center_staggered(host.stream, device.centered_velocity, device.velocity);
                     field::fill(host.stream, device.force, 0.0f);
-                    (*this->scalar_force)(device.force, 1u, device.density_data, -host.buoyancy_density_factor, 0.0f, device.occupancy);
-                    (*this->scalar_force)(device.force, 1u, device.temperature_data, host.buoyancy_temperature_factor, -host.ambient_temperature, device.occupancy);
+                    field::add_unmasked_scalar_to_component(host.stream, device.force, 1u, device.density_data, device.occupancy, -host.buoyancy_density_factor, 0.0f);
+                    field::add_unmasked_scalar_to_component(host.stream, device.force, 1u, device.temperature_data, device.occupancy, host.buoyancy_temperature_factor, -host.ambient_temperature);
                     (*this->vorticity)(device.force, device.centered_velocity, device.occupancy);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
                         field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);

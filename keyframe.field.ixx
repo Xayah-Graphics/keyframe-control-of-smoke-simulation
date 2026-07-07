@@ -73,6 +73,7 @@ export namespace kfs::field {
     void copy_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source);
     void copy_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const StaggeredVectorField3D& source);
     void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, float scale);
+    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, const std::uint8_t* mask, float scale, float bias);
     void add_scaled(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, float scale);
     void add_scaled(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, float scale);
     void upload(cudaStream_t stream, ScalarField3D& destination, std::span<const float> source);

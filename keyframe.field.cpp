@@ -121,6 +121,18 @@ namespace kfs::field {
         cuda::field::add_scaled(stream, destination.data, current.data, source.data, destination.count(), scale);
     }
 
+    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const std::uint8_t* mask, const float scale, const float bias) {
+        if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
+        if (axis >= 3u) throw std::runtime_error{"invalid axis"};
+        if (destination.resolution != source.resolution) throw std::runtime_error{"field resolution mismatch"};
+        if (destination.count() == 0u || destination.data[axis] == nullptr) throw std::runtime_error{"destination field component is empty"};
+        if (source.count() == 0u || source.data == nullptr) throw std::runtime_error{"source field is empty"};
+        if (mask == nullptr) throw std::runtime_error{"field mask must not be null"};
+        if (!std::isfinite(scale)) throw std::runtime_error{"field scale must be finite"};
+        if (!std::isfinite(bias)) throw std::runtime_error{"field bias must be finite"};
+        cuda::field::add_unmasked_scalar_to_component(stream, destination.data[axis], source.data, mask, destination.count(), scale, bias);
+    }
+
     void fill(cudaStream_t stream, ScalarField3D& values, const float value) {
         if (stream == nullptr) throw std::runtime_error{"field stream must not be null"};
         if (values.count() == 0u || values.data == nullptr) throw std::runtime_error{"values field is empty"};

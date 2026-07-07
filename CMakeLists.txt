@@ -81,9 +81,6 @@ target_sources(
         operators/keyframe.operators.advection.cpp
         operators/keyframe.operators.advection.cu
         operators/keyframe.operators.advection.h
-        operators/keyframe.operators.scalar_force.cpp
-        operators/keyframe.operators.scalar_force.cu
-        operators/keyframe.operators.scalar_force.h
         operators/keyframe.operators.emitter.cpp
         operators/keyframe.operators.emitter.cu
         operators/keyframe.operators.emitter.h
@@ -103,7 +100,6 @@ target_sources(
         keyframe.geometry.ixx
         keyframe.boundary.ixx
         operators/keyframe.operators.advection.ixx
-        operators/keyframe.operators.scalar_force.ixx
         operators/keyframe.operators.emitter.ixx
         operators/keyframe.operators.projection.ixx
         operators/keyframe.operators.vorticity.ixx

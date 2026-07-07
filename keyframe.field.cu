@@ -61,6 +61,13 @@ namespace kfs::cuda::field {
             destination[index] = current[index] + scale * source[index];
         }
 
+        __global__ void add_unmasked_scalar_to_component_kernel(float* destination, const float* source, const std::uint8_t* mask, const float scale, const float bias, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            if (mask[index] != 0u) return;
+            destination[index] += scale * (source[index] + bias);
+        }
+
         __global__ void center_staggered_kernel(float* cx, float* cy, float* cz, const float* sx, const float* sy, const float* sz, const int nx, const int ny, const int nz) {
             const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
             const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -143,6 +150,11 @@ namespace kfs::cuda::field {
     void add_scaled(cudaStream_t stream, float* const destination, const float* const current, const float* const source, const std::uint64_t count, const float scale) {
         add_scaled_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, current, source, scale, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_scaled_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void add_unmasked_scalar_to_component(cudaStream_t stream, float* const destination, const float* const source, const std::uint8_t* const mask, const std::uint64_t count, const float scale, const float bias) {
+        add_unmasked_scalar_to_component_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, mask, scale, bias, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_unmasked_scalar_to_component_kernel: "} + cudaGetErrorString(status)};
     }
 
     void center_staggered(cudaStream_t stream, float* const cx, float* const cy, float* const cz, const float* const sx, const float* const sy, const float* const sz, const std::array<std::int32_t, 3> resolution) {
