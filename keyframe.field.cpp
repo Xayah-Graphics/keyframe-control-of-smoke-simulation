@@ -343,4 +343,16 @@ namespace kfs::field {
     void sample(const cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source) {
         cuda::field::sample(stream, destination.data[0], destination.data[1], destination.data[2], source.data[0], source.data[1], source.data[2], destination.resolution);
     }
+
+    ScalarFieldStats stats(const cudaStream_t stream, const ScalarField3D& source) {
+        cuda::field::ScalarStats raw{};
+        cuda::field::stats(stream, source.data, source.count(), raw);
+        return ScalarFieldStats{
+            .min           = raw.min,
+            .max           = raw.max,
+            .sum           = raw.sum,
+            .mean          = raw.mean,
+            .nonzero_count = raw.nonzero_count,
+        };
+    }
 } // namespace kfs::field

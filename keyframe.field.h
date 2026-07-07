@@ -33,5 +33,15 @@ namespace kfs::cuda {
         void scale(cudaStream_t stream, float* destination, const float* source, std::uint64_t count, float factor);
 
         void sample(cudaStream_t stream, float* centered_x, float* centered_y, float* centered_z, const float* staggered_x, const float* staggered_y, const float* staggered_z, std::array<std::int32_t, 3> resolution);
+
+        struct ScalarStats final {
+            float min{0.0f};
+            float max{0.0f};
+            double sum{0.0};
+            float mean{0.0f};
+            std::uint64_t nonzero_count{0u};
+        };
+
+        void stats(cudaStream_t stream, const float* values, std::uint64_t count, ScalarStats& output);
     } // namespace field
 } // namespace kfs::cuda

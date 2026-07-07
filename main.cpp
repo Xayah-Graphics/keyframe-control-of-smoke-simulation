@@ -2,8 +2,8 @@
 
 import std;
 import xayah.util.xcli;
+import keyframe.field;
 import keyframe.solver;
-import keyframe.inspector;
 
 int main(const int argc, const char* const* const argv) {
     try {
@@ -63,10 +63,10 @@ int main(const int argc, const char* const* const argv) {
             if (!quiet) std::println("frame {}/{}", stats->step, frames);
         }
 
-        const kfs::inspector::Inspector inspector{smoke};
-        const kfs::inspector::FrameStats frame = inspector.frame_stats(static_cast<int>(frames));
+        const kfs::field::ScalarFieldStats density_stats     = kfs::field::stats(smoke.host.stream, smoke.device.density_data);
+        const kfs::field::ScalarFieldStats temperature_stats = kfs::field::stats(smoke.host.stream, smoke.device.temperature_data);
 
-        std::println("keyframe frames={} dt={:.6f} resolution=({}, {}, {}) density_sum={:.6f} temperature_sum={:.6f}", frames, delta_seconds, frame.resolution[0], frame.resolution[1], frame.resolution[2], frame.density.sum, frame.temperature.sum);
+        std::println("keyframe frames={} dt={:.6f} resolution=({}, {}, {}) density_sum={:.6f} temperature_sum={:.6f}", frames, delta_seconds, smoke.host.nx, smoke.host.ny, smoke.host.nz, density_stats.sum, temperature_stats.sum);
         return 0;
     } catch (const std::exception& error) {
         std::println(stderr, "{}", error.what());

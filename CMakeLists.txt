@@ -90,9 +90,6 @@ target_sources(
         operators/keyframe.operators.vorticity.cu
         operators/keyframe.operators.vorticity.h
         keyframe.solver.cpp
-        keyframe.inspector.cu
-        keyframe.inspector.cpp
-        keyframe.inspector.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         keyframe.field.ixx
@@ -103,7 +100,6 @@ target_sources(
         operators/keyframe.operators.projection.ixx
         operators/keyframe.operators.vorticity.ixx
         keyframe.solver.ixx
-        keyframe.inspector.ixx
 )
 target_link_libraries(libkeyframe PRIVATE CUDA::cudart CUDA::cublas CUDA::cusparse)
 set_property(TARGET libkeyframe PROPERTY CXX_MODULE_STD ON)

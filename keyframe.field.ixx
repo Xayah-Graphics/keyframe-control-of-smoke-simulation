@@ -78,6 +78,14 @@ export namespace kfs::field {
         std::array<float*, 3> data{};
     };
 
+    struct ScalarFieldStats final {
+        float min{0.0f};
+        float max{0.0f};
+        double sum{0.0};
+        float mean{0.0f};
+        std::uint64_t nonzero_count{0u};
+    };
+
     void fill(cudaStream_t stream, ScalarField3D& values, float value);
     void fill(cudaStream_t stream, IndexedField3D& values, std::uint32_t value);
     void fill(cudaStream_t stream, CenteredVectorField3D& values, float value);
@@ -121,4 +129,6 @@ export namespace kfs::field {
     void scale(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source, float factor);
 
     void sample(cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source);
+
+    [[nodiscard]] ScalarFieldStats stats(cudaStream_t stream, const ScalarField3D& source);
 } // namespace kfs::field

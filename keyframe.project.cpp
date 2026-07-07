@@ -25,7 +25,7 @@ module;
 
 module keyframe.project;
 
-import keyframe.inspector;
+import keyframe.field;
 import keyframe.plugin;
 import keyframe.solver;
 import std;
@@ -247,6 +247,11 @@ namespace kfs::project {
                 .depth_mode  = plugin::ViewportSegmentDepthMode::Overlay,
             };
         }
+
+        struct SmokeStats final {
+            field::ScalarFieldStats density{};
+            field::ScalarFieldStats temperature{};
+        };
     } // namespace
 
     struct Project::State final {
@@ -259,7 +264,7 @@ namespace kfs::project {
         std::optional<plugin::ViewportSegmentSet> domain_segments{};
         plugin::DebugAttachmentSet debug_attachments{};
         std::optional<solver::StepStats> latest_step_stats{};
-        std::optional<inspector::FrameStats> latest_frame_stats{};
+        std::optional<SmokeStats> latest_smoke_stats{};
         std::uint64_t scene_revision{1u};
         std::uint64_t exported_density_revision{};
         std::uint64_t exported_density_byte_size{};
@@ -377,10 +382,8 @@ namespace kfs::project {
 
         void prepare_density_external_buffer(Project::State& state) {
             if (state.smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
-            const inspector::SolverDeviceView view = inspector::Inspector{*state.smoke}.device_view();
-            if (!view.initialized || view.density == nullptr || view.cell_count == 0u) throw std::runtime_error{"Keyframe smoke density field is not initialized."};
-            if (view.cell_count > std::numeric_limits<std::uint64_t>::max() / sizeof(float)) throw std::runtime_error{"Keyframe smoke density byte size overflows uint64."};
-            const std::uint64_t byte_size = view.cell_count * sizeof(float);
+            const auto& density          = state.smoke->device.density_data;
+            const std::uint64_t byte_size = static_cast<std::uint64_t>(density.bytes());
             state.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, byte_size, "keyframe smoke density volume", "density volume");
             float* const density_values = state.density_buffer.mapped_as<float>();
             if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
@@ -403,28 +406,31 @@ namespace kfs::project {
             }
 
             if (!state.density_external_ready) throw std::runtime_error{"Keyframe smoke density external buffer is not ready."};
-            const inspector::SolverDeviceView view = inspector::Inspector{*state.smoke}.device_view();
-            if (!view.initialized || view.density == nullptr || view.cell_count == 0u) throw std::runtime_error{"Keyframe smoke density field is not initialized."};
-            if (view.cell_count > std::numeric_limits<std::uint64_t>::max() / sizeof(float)) throw std::runtime_error{"Keyframe smoke density byte size overflows uint64."};
-            const std::uint64_t byte_size = view.cell_count * sizeof(float);
+            const auto& density           = state.smoke->device.density_data;
+            const std::uint64_t byte_size = static_cast<std::uint64_t>(density.bytes());
             const std::uint64_t revision  = static_cast<std::uint64_t>(state.smoke->host.current_step) + 1u;
             if (state.density_volume.has_value() && state.exported_density_revision == revision && state.exported_density_byte_size == byte_size) return false;
 
             float* const density_values = state.density_buffer.mapped_as<float>();
             if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
-            if (const cudaError_t status = cudaMemcpyAsync(density_values, view.density, byte_size, cudaMemcpyDeviceToDevice, state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+            if (const cudaError_t status = cudaMemcpyAsync(density_values, density.data, byte_size, cudaMemcpyDeviceToDevice, state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+            const std::array dimensions{
+                static_cast<std::uint32_t>(density.resolution[0]),
+                static_cast<std::uint32_t>(density.resolution[1]),
+                static_cast<std::uint32_t>(density.resolution[2]),
+            };
 
             state.density_volume = plugin::VolumeGrid{
                 .name       = density_volume_name,
-                .dimensions = view.resolution,
+                .dimensions = dimensions,
                 .origin     = {0.0f, 0.0f, 0.0f},
                 .voxel_size = {state.smoke->host.cell_size, state.smoke->host.cell_size, state.smoke->host.cell_size},
                 .channels =
                     {
                         plugin::VolumeChannel{
                             .name                    = "density",
-                            .dimensions              = view.resolution,
+                            .dimensions              = dimensions,
                             .format                  = plugin::VolumeChannelFormat::Float32,
                             .source_kind             = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
                             .index_encoding          = plugin::VolumeChannelIndexEncoding::Linear,
@@ -486,7 +492,10 @@ namespace kfs::project {
         state->host_services = std::move(context.host_services);
         state->smoke         = std::make_unique<solver::Solver>(options.config);
         publish_domain_if_ready(*state);
-        state->latest_frame_stats = inspector::Inspector{*state->smoke}.frame_stats(static_cast<int>(state->smoke->host.current_step));
+        state->latest_smoke_stats = SmokeStats{
+            .density     = field::stats(state->smoke->host.stream, state->smoke->device.density_data),
+            .temperature = field::stats(state->smoke->host.stream, state->smoke->device.temperature_data),
+        };
         return Project{std::move(state)};
     }
 
@@ -504,7 +513,10 @@ namespace kfs::project {
         });
         if (!stats) throw std::runtime_error{stats.error()};
         this->state->latest_step_stats  = *stats;
-        this->state->latest_frame_stats = inspector::Inspector{*this->state->smoke}.frame_stats(static_cast<int>(this->state->smoke->host.current_step));
+        this->state->latest_smoke_stats = SmokeStats{
+            .density     = field::stats(this->state->smoke->host.stream, this->state->smoke->device.density_data),
+            .temperature = field::stats(this->state->smoke->host.stream, this->state->smoke->device.temperature_data),
+        };
         publish_domain_if_ready(*this->state);
         static_cast<void>(publish_density_if_ready(*this->state));
         ++this->state->scene_revision;
@@ -594,8 +606,8 @@ namespace kfs::project {
             controls.metric("step", "Step", this->state->latest_step_stats->step).section(section_statistics_id).display_primary().color({0.16f, 0.86f, 0.55f, 1.0f});
             controls.metric("step_elapsed_ms", "Step ms", std::format("{:.3f}", this->state->latest_step_stats->elapsed_ms)).section(section_statistics_id);
         }
-        if (this->state->latest_frame_stats.has_value()) {
-            const inspector::FrameStats& stats = *this->state->latest_frame_stats;
+        if (this->state->latest_smoke_stats.has_value()) {
+            const SmokeStats& stats = *this->state->latest_smoke_stats;
             controls.metric("density_sum", "Density Sum", std::format("{:.6g}", stats.density.sum)).section(section_statistics_id);
             controls.metric("density_max", "Density Max", std::format("{:.6g}", stats.density.max)).section(section_statistics_id);
             controls.metric("density_nonzero", "Density Nonzero", stats.density.nonzero_count).section(section_statistics_id);
