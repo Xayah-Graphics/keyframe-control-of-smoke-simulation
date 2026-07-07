@@ -7,9 +7,9 @@ export import keyframe.field;
 export import keyframe.boundary;
 export import keyframe.operators.advection;
 export import keyframe.operators.emitter;
-import keyframe.operators.buoyancy;
+import keyframe.operators.scalar_force;
 import keyframe.operators.projection;
-import keyframe.operators.solid;
+import keyframe.operators.masked_scalar_assignment;
 import keyframe.operators.vorticity;
 
 namespace kfs::solver {
@@ -54,6 +54,8 @@ namespace kfs::solver {
             std::int32_t nz{0};
             float cell_size{0.0f};
             float ambient_temperature{0.0f};
+            float buoyancy_density_factor{0.0f};
+            float buoyancy_temperature_factor{0.0f};
             float density_emission_rate{0.0f};
             float temperature_emission_rate{0.0f};
             boundary::PackedDomainBoundary boundary{};
@@ -78,9 +80,9 @@ namespace kfs::solver {
     private:
         std::optional<operators::Advection> advection{};
         std::optional<operators::Emitter> emitter{};
-        std::optional<operators::Buoyancy> buoyancy{};
+        std::optional<operators::ScalarForce> scalar_force{};
         std::optional<operators::Projection> projection{};
-        std::optional<operators::Solid> solid{};
+        std::optional<operators::MaskedScalarAssignment> masked_scalar_assignment{};
         std::optional<operators::Vorticity> vorticity{};
     };
 } // namespace kfs::solver

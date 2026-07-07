@@ -14,7 +14,7 @@ export namespace kfs::operators {
         Vorticity(Vorticity&&) noexcept            = delete;
         Vorticity& operator=(Vorticity&&) noexcept = delete;
 
-        void operator()(field::CenteredVectorField3D& force, const field::CenteredVectorField3D& centered_velocity, const std::uint8_t* occupancy);
+        void operator()(field::CenteredVectorField3D& destination, const field::CenteredVectorField3D& source, const std::uint8_t* cell_mask);
 
     private:
         cudaStream_t stream{nullptr};

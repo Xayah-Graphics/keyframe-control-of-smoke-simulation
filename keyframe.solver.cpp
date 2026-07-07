@@ -8,9 +8,9 @@ import keyframe.field;
 import keyframe.boundary;
 import keyframe.operators.advection;
 import keyframe.operators.emitter;
-import keyframe.operators.buoyancy;
+import keyframe.operators.scalar_force;
 import keyframe.operators.projection;
-import keyframe.operators.solid;
+import keyframe.operators.masked_scalar_assignment;
 import keyframe.operators.vorticity;
 
 namespace kfs::solver {
@@ -31,14 +31,16 @@ namespace kfs::solver {
         }
 
         void initialize_host(Solver::HostData& host, const Config& config) {
-            host.nx                        = static_cast<std::int32_t>(config.resolution[0]);
-            host.ny                        = static_cast<std::int32_t>(config.resolution[1]);
-            host.nz                        = static_cast<std::int32_t>(config.resolution[2]);
-            host.cell_size                 = config.cell_size;
-            host.ambient_temperature       = config.ambient_temperature;
-            host.density_emission_rate     = config.density_emission_rate;
-            host.temperature_emission_rate = config.temperature_emission_rate;
-            host.boundary                  = boundary::pack(config.boundary);
+            host.nx                          = static_cast<std::int32_t>(config.resolution[0]);
+            host.ny                          = static_cast<std::int32_t>(config.resolution[1]);
+            host.nz                          = static_cast<std::int32_t>(config.resolution[2]);
+            host.cell_size                   = config.cell_size;
+            host.ambient_temperature         = config.ambient_temperature;
+            host.buoyancy_density_factor     = config.buoyancy_density_factor;
+            host.buoyancy_temperature_factor = config.buoyancy_temperature_factor;
+            host.density_emission_rate       = config.density_emission_rate;
+            host.temperature_emission_rate   = config.temperature_emission_rate;
+            host.boundary                    = boundary::pack(config.boundary);
         }
 
         void initialize_field_buffers(const Solver::HostData& host, Solver::DeviceData& device) {
@@ -107,15 +109,15 @@ namespace kfs::solver {
             create_device(*this);
             this->advection.emplace(this->host.stream, this->host.cell_size, config.advection_scheme);
             this->emitter.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.emitter);
-            this->buoyancy.emplace(this->host.stream, this->host.ambient_temperature, config.buoyancy_density_factor, config.buoyancy_temperature_factor, this->host.boundary.flow);
+            this->scalar_force.emplace(this->host.stream, this->host.boundary.flow);
             this->projection.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.pressure_iterations, this->host.boundary.flow);
-            this->solid.emplace(this->host.stream);
+            this->masked_scalar_assignment.emplace(this->host.stream);
             this->vorticity.emplace(this->host.stream, std::array<std::int32_t, 3>{this->host.nx, this->host.ny, this->host.nz}, this->host.cell_size, config.vorticity_confinement, this->host.boundary.flow);
         } catch (...) {
             this->vorticity.reset();
-            this->solid.reset();
+            this->masked_scalar_assignment.reset();
             this->projection.reset();
-            this->buoyancy.reset();
+            this->scalar_force.reset();
             this->emitter.reset();
             this->advection.reset();
             destroy_device(*this);
@@ -125,9 +127,9 @@ namespace kfs::solver {
 
     Solver::~Solver() noexcept {
         this->vorticity.reset();
-        this->solid.reset();
+        this->masked_scalar_assignment.reset();
         this->projection.reset();
-        this->buoyancy.reset();
+        this->scalar_force.reset();
         this->emitter.reset();
         this->advection.reset();
         destroy_device(*this);
@@ -144,10 +146,11 @@ namespace kfs::solver {
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
-                    this->solid->apply_scalar(device.temperature_data, device.solid_temperature, device.occupancy);
+                    (*this->masked_scalar_assignment)(device.temperature_data, device.solid_temperature, device.occupancy);
                     field::center_staggered(host.stream, device.centered_velocity, device.velocity);
                     field::fill(host.stream, device.force, 0.0f);
-                    (*this->buoyancy)(device.force, device.density_data, device.temperature_data, device.occupancy);
+                    (*this->scalar_force)(device.force, 1u, device.density_data, -host.buoyancy_density_factor, 0.0f, device.occupancy);
+                    (*this->scalar_force)(device.force, 1u, device.temperature_data, host.buoyancy_temperature_factor, -host.ambient_temperature, device.occupancy);
                     (*this->vorticity)(device.force, device.centered_velocity, device.occupancy);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
                         field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);
@@ -163,7 +166,7 @@ namespace kfs::solver {
                     (*this->emitter)(device.density_temp, device.density_data, host.density_emission_rate, delta_seconds);
                     (*this->emitter)(device.temperature_temp, device.temperature_data, host.temperature_emission_rate, delta_seconds);
                     (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
-                    this->solid->apply_scalar(device.temperature_data, device.solid_temperature, device.occupancy);
+                    (*this->masked_scalar_assignment)(device.temperature_data, device.solid_temperature, device.occupancy);
                     (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);
                     boundary::boundary_fill_centered_scalar(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);
                     field::copy(host.stream, device.density_data, device.density_temp);

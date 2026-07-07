@@ -49,11 +49,11 @@ namespace kfs::cuda::boundary {
         float value  = 0.0f;
         float weight = 0.0f;
         if (left_occupied) {
-            value += solid_velocity_value(solid_velocity_x, occupancy, left_x, left_y, left_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_x, occupancy, left_x, left_y, left_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (right_occupied) {
-            value += solid_velocity_value(solid_velocity_x, occupancy, right_x, right_y, right_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_x, occupancy, right_x, right_y, right_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
@@ -101,11 +101,11 @@ namespace kfs::cuda::boundary {
         float value  = 0.0f;
         float weight = 0.0f;
         if (down_occupied) {
-            value += solid_velocity_value(solid_velocity_y, occupancy, down_x, down_y, down_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_y, occupancy, down_x, down_y, down_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (up_occupied) {
-            value += solid_velocity_value(solid_velocity_y, occupancy, up_x, up_y, up_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_y, occupancy, up_x, up_y, up_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;
@@ -153,11 +153,11 @@ namespace kfs::cuda::boundary {
         float value  = 0.0f;
         float weight = 0.0f;
         if (back_occupied) {
-            value += solid_velocity_value(solid_velocity_z, occupancy, back_x, back_y, back_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_z, occupancy, back_x, back_y, back_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         if (front_occupied) {
-            value += solid_velocity_value(solid_velocity_z, occupancy, front_x, front_y, front_z, nx, ny, nz, boundary);
+            value += constraint_velocity_value(solid_velocity_z, occupancy, front_x, front_y, front_z, nx, ny, nz, boundary);
             weight += 1.0f;
         }
         face = weight > 0.0f ? value / weight : 0.0f;

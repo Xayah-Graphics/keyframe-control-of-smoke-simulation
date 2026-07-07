@@ -167,10 +167,10 @@ namespace kfs::cuda::boundary {
         return cell_in_bounds(x, y, z, nx, ny, nz);
     }
 
-    __device__ inline bool load_occupancy(const std::uint8_t* occupancy, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
-        if (occupancy == nullptr) return false;
+    __device__ inline bool cell_is_masked(const std::uint8_t* cell_mask, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+        if (cell_mask == nullptr) return false;
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return true;
-        return occupancy[index_3d(x, y, z, nx, ny)] != 0;
+        return cell_mask[index_3d(x, y, z, nx, ny)] != 0;
     }
 
     __device__ inline float load_flow_cell(const float* field, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
@@ -244,11 +244,11 @@ namespace kfs::cuda::boundary {
         return field[index_3d(x, y, z, nx, ny)];
     }
 
-    __device__ inline float solid_velocity_value(const float* solid_velocity, const std::uint8_t* occupancy, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
-        if (solid_velocity == nullptr || occupancy == nullptr) return 0.0f;
+    __device__ inline float constraint_velocity_value(const float* constraint_velocity, const std::uint8_t* cell_mask, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+        if (constraint_velocity == nullptr || cell_mask == nullptr) return 0.0f;
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return 0.0f;
-        if (occupancy[index_3d(x, y, z, nx, ny)] == 0) return 0.0f;
-        return solid_velocity[index_3d(x, y, z, nx, ny)];
+        if (cell_mask[index_3d(x, y, z, nx, ny)] == 0) return 0.0f;
+        return constraint_velocity[index_3d(x, y, z, nx, ny)];
     }
 
     void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, float* velocity_component, const std::uint8_t* occupancy, const float* solid_velocity_component, int nx, int ny, int nz, const std::uint32_t* flow_types, const float* flow_velocity);
