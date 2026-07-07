@@ -271,7 +271,6 @@ namespace kfs::cuda::boundary {
     }
 
     __device__ inline float constraint_value(const float* constraint_values, const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
-        if (constraint_values == nullptr) return 0.0f;
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return 0.0f;
         if (cell_indices[field::index(x, y, z, nx, ny)] == 0u) return 0.0f;
         return constraint_values[field::index(x, y, z, nx, ny)];
