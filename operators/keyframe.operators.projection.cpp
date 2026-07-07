@@ -49,7 +49,7 @@ namespace kfs::operators {
 
     } // namespace
 
-    Projection::Projection(const cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const std::int32_t pressure_iterations, const boundary::PackedVectorBoundary3D& velocity_boundary, const boundary::PackedScalarBoundary3D& pressure_boundary) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_iterations{pressure_iterations}, velocity_boundary{velocity_boundary}, pressure_boundary{pressure_boundary} {
+    Projection::Projection(cudaStream_t stream, const std::array<std::int32_t, 3> resolution, const float cell_size, const boundary::PackedScalarBoundary3D& pressure_boundary, const std::int32_t pressure_iterations) : stream{stream}, resolution{resolution}, cell_size{cell_size}, pressure_boundary{pressure_boundary}, pressure_iterations{pressure_iterations} {
         try {
             this->initialize();
         } catch (...) {
@@ -167,15 +167,15 @@ namespace kfs::operators {
         this->spmv_buffer_size = 0;
     }
 
-    void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const float delta_seconds) {
+    void Projection::operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const boundary::PackedVectorBoundary3D& velocity_boundary, const float delta_seconds) {
         const std::uint64_t cells64     = cell_count(this->resolution);
         const int cells                 = static_cast<int>(cells64);
         const std::size_t bytes         = cell_bytes(this->resolution);
         const int nx                    = this->resolution[0];
         const int ny                    = this->resolution[1];
         const int nz                    = this->resolution[2];
-        const std::uint32_t* velocity_boundary_modes = this->velocity_boundary.modes.data();
-        const float* velocity_boundary_values        = this->velocity_boundary.values.data();
+        const std::uint32_t* velocity_boundary_modes = velocity_boundary.modes.data();
+        const float* velocity_boundary_values        = velocity_boundary.values.data();
         const std::uint32_t* pressure_boundary_modes = this->pressure_boundary.modes.data();
         const float* pressure_boundary_values        = this->pressure_boundary.values.data();
         cuda::operators::projection::reset_pressure_anchor(this->stream, this->pressure_anchor, cells);
@@ -204,8 +204,8 @@ namespace kfs::operators {
 
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) {
             cuda::operators::projection::project_staggered_component(this->stream, axis, working.data[axis], this->pressure, cell_indices.data, constraint_velocity.data[axis], nx, ny, nz, this->cell_size, delta_seconds, velocity_boundary_modes, velocity_boundary_values);
-            boundary::enforce(this->stream, axis, working, cell_indices, constraint_velocity, this->velocity_boundary);
-            if (this->velocity_boundary.periodic[axis]) boundary::synchronize(this->stream, axis, working);
+            boundary::enforce(this->stream, axis, working, cell_indices, constraint_velocity, velocity_boundary);
+            if (velocity_boundary.periodic[axis]) boundary::synchronize(this->stream, axis, working);
         }
         field::copy(this->stream, destination, working);
     }

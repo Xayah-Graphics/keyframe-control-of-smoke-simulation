@@ -7,8 +7,8 @@ export import keyframe.field;
 export import keyframe.boundary;
 export import keyframe.operators.advection;
 export import keyframe.operators.emitter;
-import keyframe.operators.projection;
-import keyframe.operators.vorticity;
+export import keyframe.operators.projection;
+export import keyframe.operators.vorticity;
 
 namespace kfs::solver {
     export struct SmokeBoundary final {
@@ -46,21 +46,6 @@ namespace kfs::solver {
         };
     };
 
-    export struct Config final {
-        std::array<std::uint32_t, 3> resolution{64, 96, 64};
-        float cell_size{0.01875f};
-        std::int32_t pressure_iterations{64};
-        float ambient_temperature{0.0f};
-        float buoyancy_density_factor{0.15f};
-        float buoyancy_temperature_factor{1.2f};
-        float vorticity_confinement{0.22f};
-        operators::Advection::Scheme advection_scheme{operators::Advection::Scheme::monotonic_cubic};
-        operators::Emitter::Source emitter{};
-        float density_emission_rate{18.0f};
-        float temperature_emission_rate{36.0f};
-        SmokeBoundary boundary{};
-    };
-
     export struct StepRequest final {
         float delta_seconds{1.0f / 60.0f};
         std::int32_t iterations{1};
@@ -72,35 +57,27 @@ namespace kfs::solver {
     };
 
     export struct Solver final {
-        explicit Solver(const Config& config = {});
-        ~Solver() noexcept;
+        explicit Solver(std::array<std::uint32_t, 3> resolution = {64, 96, 64}, float cell_size = 0.01875f, SmokeBoundary boundaries = {}, cudaStream_t execution_stream = nullptr);
+        ~Solver() noexcept = default;
         Solver(const Solver& other)                = delete;
         Solver& operator=(const Solver& other)     = delete;
         Solver(Solver&& other) noexcept            = delete;
         Solver& operator=(Solver&& other) noexcept = delete;
 
-        [[nodiscard]] std::expected<StepStats, std::string> step(const StepRequest& request);
+        const std::array<std::int32_t, 3> resolution{0, 0, 0};
+        const float cell_size{0.0f};
+        const boundary::ScalarBoundary3D pressure_boundary{};
+        CUstream_st* const stream{nullptr};
 
-        struct HostData final {
-            std::int32_t nx{0};
-            std::int32_t ny{0};
-            std::int32_t nz{0};
-            float cell_size{0.0f};
-            float ambient_temperature{0.0f};
-            float buoyancy_density_factor{0.0f};
-            float buoyancy_temperature_factor{0.0f};
-            float density_emission_rate{0.0f};
-            float temperature_emission_rate{0.0f};
-            struct PackedSmokeBoundary final {
-                boundary::PackedVectorBoundary3D velocity{};
-                boundary::PackedScalarBoundary3D pressure{};
-                boundary::PackedScalarBoundary3D density{};
-                boundary::PackedScalarBoundary3D temperature{};
-            } boundary{};
-            cudaStream_t stream{nullptr};
-            std::uint32_t current_step{0u};
-        } host;
-
+        float ambient_temperature{0.0f};
+        float buoyancy_density_factor{0.15f};
+        float buoyancy_temperature_factor{1.2f};
+        float density_emission_rate{18.0f};
+        float temperature_emission_rate{36.0f};
+        boundary::VectorBoundary3D velocity_boundary{};
+        boundary::ScalarBoundary3D density_boundary{};
+        boundary::ScalarBoundary3D temperature_boundary{};
+        std::uint32_t current_step{0u};
         struct DeviceData final {
             field::ScalarField3D density_data{{0, 0, 0}};
             field::ScalarField3D density_temp{{0, 0, 0}};
@@ -113,12 +90,12 @@ namespace kfs::solver {
             field::CenteredVectorField3D centered_velocity{{0, 0, 0}};
             field::ScalarField3D solid_temperature{{0, 0, 0}};
             field::IndexedField3D occupancy{{0, 0, 0}};
-        } device;
+        } device{};
+        operators::Advection advection;
+        operators::Emitter emitter;
+        operators::Projection projection;
+        operators::Vorticity vorticity;
 
-    private:
-        std::optional<operators::Advection> advection{};
-        std::optional<operators::Emitter> emitter{};
-        std::optional<operators::Projection> projection{};
-        std::optional<operators::Vorticity> vorticity{};
+        [[nodiscard]] std::expected<StepStats, std::string> step(const StepRequest& request);
     };
 } // namespace kfs::solver

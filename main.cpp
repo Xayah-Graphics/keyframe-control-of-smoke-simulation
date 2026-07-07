@@ -63,10 +63,11 @@ int main(const int argc, const char* const* const argv) {
             if (!quiet) std::println("frame {}/{}", stats->step, frames);
         }
 
-        const kfs::field::ScalarFieldStats density_stats     = kfs::field::stats(smoke.host.stream, smoke.device.density_data);
-        const kfs::field::ScalarFieldStats temperature_stats = kfs::field::stats(smoke.host.stream, smoke.device.temperature_data);
+        const kfs::field::ScalarFieldStats density_stats     = kfs::field::stats(smoke.stream, smoke.device.density_data);
+        const kfs::field::ScalarFieldStats temperature_stats = kfs::field::stats(smoke.stream, smoke.device.temperature_data);
+        const auto& resolution                               = smoke.device.density_data.resolution;
 
-        std::println("keyframe frames={} dt={:.6f} resolution=({}, {}, {}) density_sum={:.6f} temperature_sum={:.6f}", frames, delta_seconds, smoke.host.nx, smoke.host.ny, smoke.host.nz, density_stats.sum, temperature_stats.sum);
+        std::println("keyframe frames={} dt={:.6f} resolution=({}, {}, {}) density_sum={:.6f} temperature_sum={:.6f}", frames, delta_seconds, resolution[0], resolution[1], resolution[2], density_stats.sum, temperature_stats.sum);
         return 0;
     } catch (const std::exception& error) {
         std::println(stderr, "{}", error.what());

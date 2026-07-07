@@ -10,25 +10,25 @@ import keyframe.boundary;
 
 export namespace kfs::operators {
     struct Projection final {
-        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, std::int32_t pressure_iterations, const boundary::PackedVectorBoundary3D& velocity_boundary, const boundary::PackedScalarBoundary3D& pressure_boundary);
+        Projection(cudaStream_t stream, std::array<std::int32_t, 3> resolution, float cell_size, const boundary::PackedScalarBoundary3D& pressure_boundary, std::int32_t pressure_iterations);
         ~Projection() noexcept;
         Projection(const Projection&)                = delete;
         Projection& operator=(const Projection&)     = delete;
         Projection(Projection&&) noexcept            = delete;
         Projection& operator=(Projection&&) noexcept = delete;
 
-        void operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, float delta_seconds);
+        std::int32_t pressure_iterations{0};
+
+        void operator()(field::StaggeredVectorField3D& destination, field::StaggeredVectorField3D& working, const field::CenteredVectorField3D& constraint_velocity, const field::IndexedField3D& cell_indices, const boundary::PackedVectorBoundary3D& velocity_boundary, float delta_seconds);
 
     private:
         void initialize();
         void release() noexcept;
 
-        cudaStream_t stream{nullptr};
-        std::array<std::int32_t, 3> resolution{0, 0, 0};
-        float cell_size{0.0f};
-        std::int32_t pressure_iterations{0};
-        boundary::PackedVectorBoundary3D velocity_boundary{};
-        boundary::PackedScalarBoundary3D pressure_boundary{};
+        CUstream_st* const stream{nullptr};
+        const std::array<std::int32_t, 3> resolution{0, 0, 0};
+        const float cell_size{0.0f};
+        const boundary::PackedScalarBoundary3D pressure_boundary{};
 
         cublasHandle_t cublas{nullptr};
         cusparseHandle_t cusparse{nullptr};

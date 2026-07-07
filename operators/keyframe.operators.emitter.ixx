@@ -22,12 +22,13 @@ export namespace kfs::operators {
         Emitter(Emitter&&) noexcept            = delete;
         Emitter& operator=(Emitter&&) noexcept = delete;
 
+        Source source{};
+
         void operator()(field::ScalarField3D& destination, const field::ScalarField3D& current, float rate, float delta_seconds) const;
 
     private:
-        cudaStream_t stream{nullptr};
-        std::array<std::int32_t, 3> resolution{0, 0, 0};
-        float cell_size{0.0f};
-        Source source{};
+        CUstream_st* const stream{nullptr};
+        const std::array<std::int32_t, 3> resolution{0, 0, 0};
+        const float cell_size{0.0f};
     };
 } // namespace kfs::operators

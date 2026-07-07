@@ -51,7 +51,8 @@ namespace kfs::project {
         };
 
         struct OpenOptions final {
-            solver::Config config{};
+            std::array<std::uint32_t, 3> resolution{64, 96, 64};
+            float vorticity_confinement{0.22f};
             float delta_seconds{1.0f / 60.0f};
             std::int32_t steps_per_update{1};
             float density_scale{default_density_scale};
@@ -109,11 +110,11 @@ namespace kfs::project {
             for (const plugin::Option& option : options) {
                 if (!seen_options.insert(option.key).second) throw std::runtime_error{std::format("Keyframe smoke open option '{}' is duplicated.", option.key)};
                 if (option.key == "resolution_x")
-                    parsed.config.resolution[0] = parse_u32_option(option.value, "resolution_x");
+                    parsed.resolution[0] = parse_u32_option(option.value, "resolution_x");
                 else if (option.key == "resolution_y")
-                    parsed.config.resolution[1] = parse_u32_option(option.value, "resolution_y");
+                    parsed.resolution[1] = parse_u32_option(option.value, "resolution_y");
                 else if (option.key == "resolution_z")
-                    parsed.config.resolution[2] = parse_u32_option(option.value, "resolution_z");
+                    parsed.resolution[2] = parse_u32_option(option.value, "resolution_z");
                 else if (option.key == "dt")
                     parsed.delta_seconds = parse_float_option(option.value, "dt");
                 else if (option.key == "steps_per_update") {
@@ -123,14 +124,14 @@ namespace kfs::project {
                 } else if (option.key == "density_scale")
                     parsed.density_scale = parse_float_option(option.value, "density_scale");
                 else if (option.key == "vorticity_confinement")
-                    parsed.config.vorticity_confinement = parse_float_option(option.value, "vorticity_confinement");
+                    parsed.vorticity_confinement = parse_float_option(option.value, "vorticity_confinement");
                 else
                     throw std::runtime_error{std::format("unknown Keyframe smoke open option '{}'.", option.key)};
             }
             if (parsed.delta_seconds <= 0.0f) throw std::runtime_error{"dt must be positive."};
             if (parsed.steps_per_update < 1) throw std::runtime_error{"steps_per_update must be positive."};
             if (parsed.density_scale <= 0.0f) throw std::runtime_error{"density_scale must be positive."};
-            if (!std::isfinite(parsed.config.vorticity_confinement) || parsed.config.vorticity_confinement < 0.0f) throw std::runtime_error{"vorticity_confinement must be finite and non-negative."};
+            if (!std::isfinite(parsed.vorticity_confinement) || parsed.vorticity_confinement < 0.0f) throw std::runtime_error{"vorticity_confinement must be finite and non-negative."};
             return parsed;
         }
 
@@ -172,10 +173,12 @@ namespace kfs::project {
         }
 
         [[nodiscard]] std::array<float, 3u> domain_size(const solver::Solver& smoke) {
+            const auto& resolution = smoke.device.density_data.resolution;
+            const float cell_size  = smoke.cell_size;
             return {
-                static_cast<float>(smoke.host.nx) * smoke.host.cell_size,
-                static_cast<float>(smoke.host.ny) * smoke.host.cell_size,
-                static_cast<float>(smoke.host.nz) * smoke.host.cell_size,
+                static_cast<float>(resolution[0]) * cell_size,
+                static_cast<float>(resolution[1]) * cell_size,
+                static_cast<float>(resolution[2]) * cell_size,
             };
         }
 
@@ -389,8 +392,9 @@ namespace kfs::project {
             if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
 
             if (state.density_external_ready) return;
-            if (const cudaError_t status = cudaMemsetAsync(density_values, 0, byte_size, state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync Keyframe smoke density external buffer failed: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density external buffer failed: "} + cudaGetErrorString(status)};
+            const cudaStream_t stream = state.smoke->stream;
+            if (const cudaError_t status = cudaMemsetAsync(density_values, 0, byte_size, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync Keyframe smoke density external buffer failed: "} + cudaGetErrorString(status)};
+            if (const cudaError_t status = cudaStreamSynchronize(stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density external buffer failed: "} + cudaGetErrorString(status)};
             state.density_external_ready     = true;
             state.exported_density_revision  = 0u;
             state.exported_density_byte_size = 0u;
@@ -408,13 +412,14 @@ namespace kfs::project {
             if (!state.density_external_ready) throw std::runtime_error{"Keyframe smoke density external buffer is not ready."};
             const auto& density           = state.smoke->device.density_data;
             const std::uint64_t byte_size = static_cast<std::uint64_t>(density.bytes());
-            const std::uint64_t revision  = static_cast<std::uint64_t>(state.smoke->host.current_step) + 1u;
+            const std::uint64_t revision  = static_cast<std::uint64_t>(state.smoke->current_step) + 1u;
             if (state.density_volume.has_value() && state.exported_density_revision == revision && state.exported_density_byte_size == byte_size) return false;
 
             float* const density_values = state.density_buffer.mapped_as<float>();
             if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
-            if (const cudaError_t status = cudaMemcpyAsync(density_values, density.data, byte_size, cudaMemcpyDeviceToDevice, state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
-            if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+            const cudaStream_t stream = state.smoke->stream;
+            if (const cudaError_t status = cudaMemcpyAsync(density_values, density.data, byte_size, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+            if (const cudaError_t status = cudaStreamSynchronize(stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
             const std::array dimensions{
                 static_cast<std::uint32_t>(density.resolution[0]),
                 static_cast<std::uint32_t>(density.resolution[1]),
@@ -425,7 +430,7 @@ namespace kfs::project {
                 .name       = density_volume_name,
                 .dimensions = dimensions,
                 .origin     = {0.0f, 0.0f, 0.0f},
-                .voxel_size = {state.smoke->host.cell_size, state.smoke->host.cell_size, state.smoke->host.cell_size},
+                .voxel_size = {state.smoke->cell_size, state.smoke->cell_size, state.smoke->cell_size},
                 .channels =
                     {
                         plugin::VolumeChannel{
@@ -490,11 +495,12 @@ namespace kfs::project {
         state->open          = options;
         state->debug         = DebugOptions{.density_scale = options.density_scale};
         state->host_services = std::move(context.host_services);
-        state->smoke         = std::make_unique<solver::Solver>(options.config);
+        state->smoke         = std::make_unique<solver::Solver>(options.resolution);
+        state->smoke->vorticity.confinement = options.vorticity_confinement;
         publish_domain_if_ready(*state);
         state->latest_smoke_stats = SmokeStats{
-            .density     = field::stats(state->smoke->host.stream, state->smoke->device.density_data),
-            .temperature = field::stats(state->smoke->host.stream, state->smoke->device.temperature_data),
+            .density     = field::stats(state->smoke->stream, state->smoke->device.density_data),
+            .temperature = field::stats(state->smoke->stream, state->smoke->device.temperature_data),
         };
         return Project{std::move(state)};
     }
@@ -514,8 +520,8 @@ namespace kfs::project {
         if (!stats) throw std::runtime_error{stats.error()};
         this->state->latest_step_stats  = *stats;
         this->state->latest_smoke_stats = SmokeStats{
-            .density     = field::stats(this->state->smoke->host.stream, this->state->smoke->device.density_data),
-            .temperature = field::stats(this->state->smoke->host.stream, this->state->smoke->device.temperature_data),
+            .density     = field::stats(this->state->smoke->stream, this->state->smoke->device.density_data),
+            .temperature = field::stats(this->state->smoke->stream, this->state->smoke->device.temperature_data),
         };
         publish_domain_if_ready(*this->state);
         static_cast<void>(publish_density_if_ready(*this->state));
@@ -592,11 +598,12 @@ namespace kfs::project {
     void Project::write_controls(plugin::ControlBuilder& controls) const {
         if (this->state == nullptr || this->state->smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
         controls.phase(this->state->host_update_running ? "Running" : "Paused").headline(this->state->latest_step_stats.has_value() ? "Smoke simulation running" : "Smoke solver loaded").message(this->state->latest_step_stats.has_value() ? "Keyframe smoke advances on Spectra update ticks." : "Update clock is paused before the first simulation step.");
-        controls.metric("resolution", "Resolution", std::format("{} x {} x {}", this->state->smoke->host.nx, this->state->smoke->host.ny, this->state->smoke->host.nz)).section(section_simulation_id).display_primary().color({0.55f, 0.85f, 1.0f, 1.0f});
-        controls.metric("cell_size", "Cell Size", std::format("{:.6f}", this->state->smoke->host.cell_size)).section(section_simulation_id);
+        const auto& resolution = this->state->smoke->device.density_data.resolution;
+        controls.metric("resolution", "Resolution", std::format("{} x {} x {}", resolution[0], resolution[1], resolution[2])).section(section_simulation_id).display_primary().color({0.55f, 0.85f, 1.0f, 1.0f});
+        controls.metric("cell_size", "Cell Size", std::format("{:.6f}", this->state->smoke->cell_size)).section(section_simulation_id);
         controls.metric("dt", "Delta Seconds", std::format("{:.6f}", this->state->open.delta_seconds)).section(section_simulation_id);
         controls.metric("steps_per_update", "Steps Per Update", this->state->open.steps_per_update).section(section_simulation_id);
-        controls.metric("vorticity_confinement", "Vorticity", std::format("{:.6f}", this->state->open.config.vorticity_confinement)).section(section_simulation_id);
+        controls.metric("vorticity_confinement", "Vorticity", std::format("{:.6f}", this->state->smoke->vorticity.confinement)).section(section_simulation_id);
         controls.metric("volume", "Volume", this->state->debug.show_volume && this->state->density_volume.has_value() ? "visible" : this->state->debug.show_volume ? "pending" : "hidden").section(section_view_id);
         controls.metric("density_scale", "Density Scale", std::format("{:.3f}x", this->state->debug.density_scale)).section(section_view_id);
         controls.metric("domain", "Domain", this->state->domain_segments.has_value() ? "visible" : "hidden").section(section_view_id);
