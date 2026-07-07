@@ -5,6 +5,8 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 
+#include "keyframe.field.cuh"
+
 namespace kfs::cuda::boundary {
     constexpr std::uint32_t flow_boundary_no_slip_wall   = 0u;
     constexpr std::uint32_t flow_boundary_free_slip_wall = 1u;
@@ -94,26 +96,6 @@ namespace kfs::cuda::boundary {
         };
     }
 
-    __device__ inline std::uint64_t index_3d(const int x, const int y, const int z, const int sx, const int sy) {
-        return static_cast<std::uint64_t>(z) * static_cast<std::uint64_t>(sx) * static_cast<std::uint64_t>(sy) + static_cast<std::uint64_t>(y) * static_cast<std::uint64_t>(sx) + static_cast<std::uint64_t>(x);
-    }
-
-    __device__ inline std::uint64_t index_velocity_x(const int i, const int j, const int k, const int nx, const int ny) {
-        const auto nx64 = static_cast<std::uint64_t>(nx);
-        const auto ny64 = static_cast<std::uint64_t>(ny);
-        return static_cast<std::uint64_t>(k) * (nx64 + 1u) * ny64 + static_cast<std::uint64_t>(j) * (nx64 + 1u) + static_cast<std::uint64_t>(i);
-    }
-
-    __device__ inline std::uint64_t index_velocity_y(const int i, const int j, const int k, const int nx, const int ny) {
-        const auto nx64 = static_cast<std::uint64_t>(nx);
-        const auto ny64 = static_cast<std::uint64_t>(ny);
-        return static_cast<std::uint64_t>(k) * nx64 * (ny64 + 1u) + static_cast<std::uint64_t>(j) * nx64 + static_cast<std::uint64_t>(i);
-    }
-
-    __device__ inline std::uint64_t index_velocity_z(const int i, const int j, const int k, const int nx, const int ny) {
-        return static_cast<std::uint64_t>(k) * static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) + static_cast<std::uint64_t>(j) * static_cast<std::uint64_t>(nx) + static_cast<std::uint64_t>(i);
-    }
-
     __device__ inline int wrap_index(int value, const int size) {
         if (size <= 0) return 0;
         value %= size;
@@ -169,10 +151,10 @@ namespace kfs::cuda::boundary {
 
     __device__ inline bool cell_is_marked(const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return true;
-        return cell_indices[index_3d(x, y, z, nx, ny)] != 0u;
+        return cell_indices[field::index(x, y, z, nx, ny)] != 0u;
     }
 
-    __device__ inline float load_flow_cell(const float* field, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __device__ inline float load_flow_cell(const float* values, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         if (x < 0 || x >= nx) {
             if (flow_periodic_pair(boundary, 0u) && nx > 0)
                 x = wrap_index(x, nx);
@@ -191,16 +173,16 @@ namespace kfs::cuda::boundary {
             else
                 z = z < 0 ? 0 : nz - 1;
         }
-        return field[index_3d(x, y, z, nx, ny)];
+        return values[field::index(x, y, z, nx, ny)];
     }
 
-    __device__ inline float load_center_velocity_component(const float* field, const int component_axis, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
+    __device__ inline float load_center_velocity_component(const float* values, const int component_axis, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         if (x < 0 || x >= nx) {
             const auto face = x < 0 ? boundary.x_minus : boundary.x_plus;
             if (flow_periodic_pair(boundary, 0u) && nx > 0) {
                 x = wrap_index(x, nx);
             } else {
-                const float interior = field[index_3d(x < 0 ? 0 : nx - 1, clamp_int(y, 0, ny - 1), clamp_int(z, 0, nz - 1), nx, ny)];
+                const float interior = values[field::index(x < 0 ? 0 : nx - 1, clamp_int(y, 0, ny - 1), clamp_int(z, 0, nz - 1), nx, ny)];
                 float prescribed     = 0.0f;
                 if (component_axis == 0) prescribed = face.velocity_x;
                 if (component_axis == 1) prescribed = face.velocity_y;
@@ -215,7 +197,7 @@ namespace kfs::cuda::boundary {
             if (flow_periodic_pair(boundary, 1u) && ny > 0) {
                 y = wrap_index(y, ny);
             } else {
-                const float interior = field[index_3d(clamp_int(x, 0, nx - 1), y < 0 ? 0 : ny - 1, clamp_int(z, 0, nz - 1), nx, ny)];
+                const float interior = values[field::index(clamp_int(x, 0, nx - 1), y < 0 ? 0 : ny - 1, clamp_int(z, 0, nz - 1), nx, ny)];
                 float prescribed     = 0.0f;
                 if (component_axis == 0) prescribed = face.velocity_x;
                 if (component_axis == 1) prescribed = face.velocity_y;
@@ -230,7 +212,7 @@ namespace kfs::cuda::boundary {
             if (flow_periodic_pair(boundary, 2u) && nz > 0) {
                 z = wrap_index(z, nz);
             } else {
-                const float interior = field[index_3d(clamp_int(x, 0, nx - 1), clamp_int(y, 0, ny - 1), z < 0 ? 0 : nz - 1, nx, ny)];
+                const float interior = values[field::index(clamp_int(x, 0, nx - 1), clamp_int(y, 0, ny - 1), z < 0 ? 0 : nz - 1, nx, ny)];
                 float prescribed     = 0.0f;
                 if (component_axis == 0) prescribed = face.velocity_x;
                 if (component_axis == 1) prescribed = face.velocity_y;
@@ -240,14 +222,14 @@ namespace kfs::cuda::boundary {
                 return 2.0f * prescribed - interior;
             }
         }
-        return field[index_3d(x, y, z, nx, ny)];
+        return values[field::index(x, y, z, nx, ny)];
     }
 
     __device__ inline float constraint_velocity_value(const float* constraint_velocity, const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const FlowBoundary boundary) {
         if (constraint_velocity == nullptr) return 0.0f;
         if (!resolve_cell_coordinates(x, y, z, nx, ny, nz, boundary)) return 0.0f;
-        if (cell_indices[index_3d(x, y, z, nx, ny)] == 0u) return 0.0f;
-        return constraint_velocity[index_3d(x, y, z, nx, ny)];
+        if (cell_indices[field::index(x, y, z, nx, ny)] == 0u) return 0.0f;
+        return constraint_velocity[field::index(x, y, z, nx, ny)];
     }
 
     void enforce_staggered_boundary(cudaStream_t stream, std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* solid_velocity_component, int nx, int ny, int nz, const std::uint32_t* flow_types, const float* flow_velocity);

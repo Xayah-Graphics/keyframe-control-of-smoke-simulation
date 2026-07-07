@@ -1,3 +1,4 @@
+#include "keyframe.field.cuh"
 #include "keyframe.field.h"
 #include <algorithm>
 #include <array>
@@ -24,30 +25,6 @@ namespace kfs::cuda::field {
     namespace {
         constexpr std::uint32_t selection_marked   = 0u;
         constexpr std::uint32_t selection_unmarked = 1u;
-
-        unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
-            return static_cast<unsigned>((value + divisor - 1u) / divisor);
-        }
-
-        __device__ std::uint64_t index_3d(const int x, const int y, const int z, const int sx, const int sy) {
-            return static_cast<std::uint64_t>(z) * static_cast<std::uint64_t>(sx) * static_cast<std::uint64_t>(sy) + static_cast<std::uint64_t>(y) * static_cast<std::uint64_t>(sx) + static_cast<std::uint64_t>(x);
-        }
-
-        __device__ std::uint64_t index_staggered_x(const int i, const int j, const int k, const int nx, const int ny) {
-            const auto nx64 = static_cast<std::uint64_t>(nx);
-            const auto ny64 = static_cast<std::uint64_t>(ny);
-            return static_cast<std::uint64_t>(k) * (nx64 + 1u) * ny64 + static_cast<std::uint64_t>(j) * (nx64 + 1u) + static_cast<std::uint64_t>(i);
-        }
-
-        __device__ std::uint64_t index_staggered_y(const int i, const int j, const int k, const int nx, const int ny) {
-            const auto nx64 = static_cast<std::uint64_t>(nx);
-            const auto ny64 = static_cast<std::uint64_t>(ny);
-            return static_cast<std::uint64_t>(k) * nx64 * (ny64 + 1u) + static_cast<std::uint64_t>(j) * nx64 + static_cast<std::uint64_t>(i);
-        }
-
-        __device__ std::uint64_t index_staggered_z(const int i, const int j, const int k, const int nx, const int ny) {
-            return static_cast<std::uint64_t>(k) * static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) + static_cast<std::uint64_t>(j) * static_cast<std::uint64_t>(nx) + static_cast<std::uint64_t>(i);
-        }
 
         __global__ void fill_kernel(float* values, const float value, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
@@ -114,10 +91,10 @@ namespace kfs::cuda::field {
             const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
             const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
             if (x >= nx || y >= ny || z >= nz) return;
-            const auto index = index_3d(x, y, z, nx, ny);
-            cx[index]        = 0.5f * (sx[index_staggered_x(x, y, z, nx, ny)] + sx[index_staggered_x(x + 1, y, z, nx, ny)]);
-            cy[index]        = 0.5f * (sy[index_staggered_y(x, y, z, nx, ny)] + sy[index_staggered_y(x, y + 1, z, nx, ny)]);
-            cz[index]        = 0.5f * (sz[index_staggered_z(x, y, z, nx, ny)] + sz[index_staggered_z(x, y, z + 1, nx, ny)]);
+            const auto cell = index(x, y, z, nx, ny);
+            cx[cell]        = 0.5f * (sx[index(0u, x, y, z, nx, ny)] + sx[index(0u, x + 1, y, z, nx, ny)]);
+            cy[cell]        = 0.5f * (sy[index(1u, x, y, z, nx, ny)] + sy[index(1u, x, y + 1, z, nx, ny)]);
+            cz[cell]        = 0.5f * (sz[index(2u, x, y, z, nx, ny)] + sz[index(2u, x, y, z + 1, nx, ny)]);
         }
 
         __global__ void accumulate_centered_on_staggered_x_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
@@ -129,14 +106,14 @@ namespace kfs::cuda::field {
             float sum    = 0.0f;
             float weight = 0.0f;
             if (i > 0) {
-                sum += source[index_3d(i - 1, j, k, nx, ny)];
+                sum += source[index(i - 1, j, k, nx, ny)];
                 weight += 1.0f;
             }
             if (i < nx) {
-                sum += source[index_3d(i, j, k, nx, ny)];
+                sum += source[index(i, j, k, nx, ny)];
                 weight += 1.0f;
             }
-            if (weight > 0.0f) destination[index_staggered_x(i, j, k, nx, ny)] += scale * (sum / weight);
+            if (weight > 0.0f) destination[index(0u, i, j, k, nx, ny)] += scale * (sum / weight);
         }
 
         __global__ void accumulate_centered_on_staggered_y_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
@@ -148,14 +125,14 @@ namespace kfs::cuda::field {
             float sum    = 0.0f;
             float weight = 0.0f;
             if (j > 0) {
-                sum += source[index_3d(i, j - 1, k, nx, ny)];
+                sum += source[index(i, j - 1, k, nx, ny)];
                 weight += 1.0f;
             }
             if (j < ny) {
-                sum += source[index_3d(i, j, k, nx, ny)];
+                sum += source[index(i, j, k, nx, ny)];
                 weight += 1.0f;
             }
-            if (weight > 0.0f) destination[index_staggered_y(i, j, k, nx, ny)] += scale * (sum / weight);
+            if (weight > 0.0f) destination[index(1u, i, j, k, nx, ny)] += scale * (sum / weight);
         }
 
         __global__ void accumulate_centered_on_staggered_z_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
@@ -167,14 +144,14 @@ namespace kfs::cuda::field {
             float sum    = 0.0f;
             float weight = 0.0f;
             if (k > 0) {
-                sum += source[index_3d(i, j, k - 1, nx, ny)];
+                sum += source[index(i, j, k - 1, nx, ny)];
                 weight += 1.0f;
             }
             if (k < nz) {
-                sum += source[index_3d(i, j, k, nx, ny)];
+                sum += source[index(i, j, k, nx, ny)];
                 weight += 1.0f;
             }
-            if (weight > 0.0f) destination[index_staggered_z(i, j, k, nx, ny)] += scale * (sum / weight);
+            if (weight > 0.0f) destination[index(2u, i, j, k, nx, ny)] += scale * (sum / weight);
         }
 
         constexpr unsigned stats_block_size = 256u;
@@ -265,12 +242,9 @@ namespace kfs::cuda::field {
 
     void add(cudaStream_t stream, float* const x, float* const y, float* const z, const float* const cx, const float* const cy, const float* const cz, const std::array<std::int32_t, 3> resolution, const float scale) {
         constexpr dim3 block{8u, 8u, 4u};
-        const auto nx = static_cast<std::uint64_t>(resolution[0]);
-        const auto ny = static_cast<std::uint64_t>(resolution[1]);
-        const auto nz = static_cast<std::uint64_t>(resolution[2]);
-        accumulate_centered_on_staggered_x_kernel<<<dim3{ceil_div_u32(nx + 1u, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz, block.z)}, block, 0, stream>>>(x, cx, resolution[0], resolution[1], resolution[2], scale);
-        accumulate_centered_on_staggered_y_kernel<<<dim3{ceil_div_u32(nx, block.x), ceil_div_u32(ny + 1u, block.y), ceil_div_u32(nz, block.z)}, block, 0, stream>>>(y, cy, resolution[0], resolution[1], resolution[2], scale);
-        accumulate_centered_on_staggered_z_kernel<<<dim3{ceil_div_u32(nx, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz + 1u, block.z)}, block, 0, stream>>>(z, cz, resolution[0], resolution[1], resolution[2], scale);
+        accumulate_centered_on_staggered_x_kernel<<<staggered_grid(0u, resolution[0], resolution[1], resolution[2], block), block, 0, stream>>>(x, cx, resolution[0], resolution[1], resolution[2], scale);
+        accumulate_centered_on_staggered_y_kernel<<<staggered_grid(1u, resolution[0], resolution[1], resolution[2], block), block, 0, stream>>>(y, cy, resolution[0], resolution[1], resolution[2], scale);
+        accumulate_centered_on_staggered_z_kernel<<<staggered_grid(2u, resolution[0], resolution[1], resolution[2], block), block, 0, stream>>>(z, cz, resolution[0], resolution[1], resolution[2], scale);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"accumulate_centered_on_staggered_kernel: "} + cudaGetErrorString(status)};
     }
 
@@ -291,11 +265,7 @@ namespace kfs::cuda::field {
 
     void sample(cudaStream_t stream, float* const cx, float* const cy, float* const cz, const float* const sx, const float* const sy, const float* const sz, const std::array<std::int32_t, 3> resolution) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid{
-            ceil_div_u32(static_cast<std::uint64_t>(resolution[0]), block.x),
-            ceil_div_u32(static_cast<std::uint64_t>(resolution[1]), block.y),
-            ceil_div_u32(static_cast<std::uint64_t>(resolution[2]), block.z),
-        };
+        const dim3 grid = centered_grid(resolution[0], resolution[1], resolution[2], block);
         sample_kernel<<<grid, block, 0, stream>>>(cx, cy, cz, sx, sy, sz, resolution[0], resolution[1], resolution[2]);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"sample_kernel: "} + cudaGetErrorString(status)};
     }

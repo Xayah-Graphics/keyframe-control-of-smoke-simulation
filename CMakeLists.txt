@@ -73,6 +73,7 @@ target_sources(
         PRIVATE
         keyframe.field.cu
         keyframe.field.cpp
+        keyframe.field.cuh
         keyframe.field.h
         keyframe.boundary.cpp
         keyframe.boundary.cu

@@ -1,13 +1,10 @@
 #include "../keyframe.boundary.h"
+#include "../keyframe.field.cuh"
 #include "keyframe.operators.projection.h"
 #include <stdexcept>
 #include <string>
 
 namespace kfs::cuda::operators::projection {
-    unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
-        return static_cast<unsigned>((value + divisor - 1u) / divisor);
-    }
-
     __global__ void reset_pressure_anchor_kernel(int* pressure_anchor, const int value) {
         if (blockIdx.x != 0 || threadIdx.x != 0) return;
         *pressure_anchor = value;
@@ -25,7 +22,7 @@ namespace kfs::cuda::operators::projection {
         const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
         const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (x >= nx || y >= ny || z >= nz) return;
-        const auto index = boundary::index_3d(x, y, z, nx, ny);
+        const auto index = field::index(x, y, z, nx, ny);
         const int anchor = *pressure_anchor;
         if (static_cast<int>(index) == anchor) {
             rhs[index] = 0.0f;
@@ -35,7 +32,7 @@ namespace kfs::cuda::operators::projection {
             rhs[index] = 0.0f;
             return;
         }
-        const float divergence = (velocity_x[boundary::index_velocity_x(x + 1, y, z, nx, ny)] - velocity_x[boundary::index_velocity_x(x, y, z, nx, ny)] + velocity_y[boundary::index_velocity_y(x, y + 1, z, nx, ny)] - velocity_y[boundary::index_velocity_y(x, y, z, nx, ny)] + velocity_z[boundary::index_velocity_z(x, y, z + 1, nx, ny)] - velocity_z[boundary::index_velocity_z(x, y, z, nx, ny)]) / h;
+        const float divergence = (velocity_x[field::index(0u, x + 1, y, z, nx, ny)] - velocity_x[field::index(0u, x, y, z, nx, ny)] + velocity_y[field::index(1u, x, y + 1, z, nx, ny)] - velocity_y[field::index(1u, x, y, z, nx, ny)] + velocity_z[field::index(2u, x, y, z + 1, nx, ny)] - velocity_z[field::index(2u, x, y, z, nx, ny)]) / h;
         float boundary_sum     = 0.0f;
         if (x == 0 && boundary_config.x_minus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.x_minus.pressure;
         if (x == nx - 1 && boundary_config.x_plus.type == boundary::flow_boundary_outflow) boundary_sum += boundary_config.x_plus.pressure;
@@ -58,7 +55,7 @@ namespace kfs::cuda::operators::projection {
                 return;
             }
         }
-        const int neighbor = static_cast<int>(boundary::index_3d(next_x, next_y, next_z, nx, ny));
+        const int neighbor = static_cast<int>(field::index(next_x, next_y, next_z, nx, ny));
         if (cell_indices[static_cast<std::uint64_t>(neighbor)] != 0u) return;
         diagonal += 1.0f;
         if (neighbor == anchor) return;
@@ -134,12 +131,12 @@ namespace kfs::cuda::operators::projection {
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i > nx || j >= ny || k >= nz) return;
 
-        auto& face = velocity_x[boundary::index_velocity_x(i, j, k, nx, ny)];
+        auto& face = velocity_x[field::index(0u, i, j, k, nx, ny)];
         if (i == 0) {
             const auto domain_face = boundary_config.x_minus;
             if (domain_face.type != boundary::flow_boundary_periodic) {
                 if (domain_face.type == boundary::flow_boundary_outflow && nx > 0)
-                    face = velocity_x[boundary::index_velocity_x(1, j, k, nx, ny)];
+                    face = velocity_x[field::index(0u, 1, j, k, nx, ny)];
                 else
                     face = domain_face.velocity_x;
                 return;
@@ -149,7 +146,7 @@ namespace kfs::cuda::operators::projection {
             const auto domain_face = boundary_config.x_plus;
             if (domain_face.type != boundary::flow_boundary_periodic) {
                 if (domain_face.type == boundary::flow_boundary_outflow && nx > 0)
-                    face = velocity_x[boundary::index_velocity_x(nx - 1, j, k, nx, ny)];
+                    face = velocity_x[field::index(0u, nx - 1, j, k, nx, ny)];
                 else
                     face = domain_face.velocity_x;
                 return;
@@ -164,8 +161,8 @@ namespace kfs::cuda::operators::projection {
         int right_z             = k;
         const bool has_left     = boundary::resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary_config);
         const bool has_right    = boundary::resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary_config);
-        const bool left_marked  = has_left && cell_indices[boundary::index_3d(left_x, left_y, left_z, nx, ny)] != 0u;
-        const bool right_marked = has_right && cell_indices[boundary::index_3d(right_x, right_y, right_z, nx, ny)] != 0u;
+        const bool left_marked  = has_left && cell_indices[field::index(left_x, left_y, left_z, nx, ny)] != 0u;
+        const bool right_marked = has_right && cell_indices[field::index(right_x, right_y, right_z, nx, ny)] != 0u;
         if (left_marked || right_marked) {
             float value  = 0.0f;
             float weight = 0.0f;
@@ -181,8 +178,8 @@ namespace kfs::cuda::operators::projection {
             return;
         }
         if (has_left && has_right) {
-            const float pressure_right = pressure[boundary::index_3d(right_x, right_y, right_z, nx, ny)];
-            const float pressure_left  = pressure[boundary::index_3d(left_x, left_y, left_z, nx, ny)];
+            const float pressure_right = pressure[field::index(right_x, right_y, right_z, nx, ny)];
+            const float pressure_left  = pressure[field::index(left_x, left_y, left_z, nx, ny)];
             face -= dt * (pressure_right - pressure_left) / h;
         }
     }
@@ -193,12 +190,12 @@ namespace kfs::cuda::operators::projection {
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j > ny || k >= nz) return;
 
-        auto& face = velocity_y[boundary::index_velocity_y(i, j, k, nx, ny)];
+        auto& face = velocity_y[field::index(1u, i, j, k, nx, ny)];
         if (j == 0) {
             const auto domain_face = boundary_config.y_minus;
             if (domain_face.type != boundary::flow_boundary_periodic) {
                 if (domain_face.type == boundary::flow_boundary_outflow && ny > 0)
-                    face = velocity_y[boundary::index_velocity_y(i, 1, k, nx, ny)];
+                    face = velocity_y[field::index(1u, i, 1, k, nx, ny)];
                 else
                     face = domain_face.velocity_y;
                 return;
@@ -208,7 +205,7 @@ namespace kfs::cuda::operators::projection {
             const auto domain_face = boundary_config.y_plus;
             if (domain_face.type != boundary::flow_boundary_periodic) {
                 if (domain_face.type == boundary::flow_boundary_outflow && ny > 0)
-                    face = velocity_y[boundary::index_velocity_y(i, ny - 1, k, nx, ny)];
+                    face = velocity_y[field::index(1u, i, ny - 1, k, nx, ny)];
                 else
                     face = domain_face.velocity_y;
                 return;
@@ -223,8 +220,8 @@ namespace kfs::cuda::operators::projection {
         int up_z               = k;
         const bool has_down    = boundary::resolve_cell_coordinates(down_x, down_y, down_z, nx, ny, nz, boundary_config);
         const bool has_up      = boundary::resolve_cell_coordinates(up_x, up_y, up_z, nx, ny, nz, boundary_config);
-        const bool down_marked = has_down && cell_indices[boundary::index_3d(down_x, down_y, down_z, nx, ny)] != 0u;
-        const bool up_marked   = has_up && cell_indices[boundary::index_3d(up_x, up_y, up_z, nx, ny)] != 0u;
+        const bool down_marked = has_down && cell_indices[field::index(down_x, down_y, down_z, nx, ny)] != 0u;
+        const bool up_marked   = has_up && cell_indices[field::index(up_x, up_y, up_z, nx, ny)] != 0u;
         if (down_marked || up_marked) {
             float value  = 0.0f;
             float weight = 0.0f;
@@ -240,8 +237,8 @@ namespace kfs::cuda::operators::projection {
             return;
         }
         if (has_down && has_up) {
-            const float pressure_up   = pressure[boundary::index_3d(up_x, up_y, up_z, nx, ny)];
-            const float pressure_down = pressure[boundary::index_3d(down_x, down_y, down_z, nx, ny)];
+            const float pressure_up   = pressure[field::index(up_x, up_y, up_z, nx, ny)];
+            const float pressure_down = pressure[field::index(down_x, down_y, down_z, nx, ny)];
             face -= dt * (pressure_up - pressure_down) / h;
         }
     }
@@ -252,12 +249,12 @@ namespace kfs::cuda::operators::projection {
         const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
         if (i >= nx || j >= ny || k > nz) return;
 
-        auto& face = velocity_z[boundary::index_velocity_z(i, j, k, nx, ny)];
+        auto& face = velocity_z[field::index(2u, i, j, k, nx, ny)];
         if (k == 0) {
             const auto domain_face = boundary_config.z_minus;
             if (domain_face.type != boundary::flow_boundary_periodic) {
                 if (domain_face.type == boundary::flow_boundary_outflow && nz > 0)
-                    face = velocity_z[boundary::index_velocity_z(i, j, 1, nx, ny)];
+                    face = velocity_z[field::index(2u, i, j, 1, nx, ny)];
                 else
                     face = domain_face.velocity_z;
                 return;
@@ -267,7 +264,7 @@ namespace kfs::cuda::operators::projection {
             const auto domain_face = boundary_config.z_plus;
             if (domain_face.type != boundary::flow_boundary_periodic) {
                 if (domain_face.type == boundary::flow_boundary_outflow && nz > 0)
-                    face = velocity_z[boundary::index_velocity_z(i, j, nz - 1, nx, ny)];
+                    face = velocity_z[field::index(2u, i, j, nz - 1, nx, ny)];
                 else
                     face = domain_face.velocity_z;
                 return;
@@ -282,8 +279,8 @@ namespace kfs::cuda::operators::projection {
         int front_z             = k;
         const bool has_back     = boundary::resolve_cell_coordinates(back_x, back_y, back_z, nx, ny, nz, boundary_config);
         const bool has_front    = boundary::resolve_cell_coordinates(front_x, front_y, front_z, nx, ny, nz, boundary_config);
-        const bool back_marked  = has_back && cell_indices[boundary::index_3d(back_x, back_y, back_z, nx, ny)] != 0u;
-        const bool front_marked = has_front && cell_indices[boundary::index_3d(front_x, front_y, front_z, nx, ny)] != 0u;
+        const bool back_marked  = has_back && cell_indices[field::index(back_x, back_y, back_z, nx, ny)] != 0u;
+        const bool front_marked = has_front && cell_indices[field::index(front_x, front_y, front_z, nx, ny)] != 0u;
         if (back_marked || front_marked) {
             float value  = 0.0f;
             float weight = 0.0f;
@@ -299,8 +296,8 @@ namespace kfs::cuda::operators::projection {
             return;
         }
         if (has_back && has_front) {
-            const float pressure_front = pressure[boundary::index_3d(front_x, front_y, front_z, nx, ny)];
-            const float pressure_back  = pressure[boundary::index_3d(back_x, back_y, back_z, nx, ny)];
+            const float pressure_front = pressure[field::index(front_x, front_y, front_z, nx, ny)];
+            const float pressure_back  = pressure[field::index(back_x, back_y, back_z, nx, ny)];
             face -= dt * (pressure_front - pressure_back) / h;
         }
     }
@@ -312,14 +309,14 @@ namespace kfs::cuda::operators::projection {
 
     void find_pressure_anchor(cudaStream_t stream, int* pressure_anchor, const std::uint32_t* cell_indices, const std::uint64_t count) {
         constexpr unsigned block = 256u;
-        const unsigned grid      = ceil_div_u32(count, block);
+        const unsigned grid      = field::ceil_div_u32(count, block);
         find_pressure_anchor_kernel<<<grid, block, 0, stream>>>(pressure_anchor, cell_indices, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"find_pressure_anchor_kernel: "} + cudaGetErrorString(status)};
     }
 
     void compute_pressure_rhs(cudaStream_t stream, float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_pressure) {
         constexpr dim3 block{8u, 8u, 4u};
-        const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
+        const dim3 grid                              = field::centered_grid(nx, ny, nz, block);
         const boundary::FlowBoundary boundary_config = boundary::make_flow_pressure_boundary(flow_types, flow_pressure);
         compute_pressure_rhs_kernel<<<grid, block, 0, stream>>>(rhs, velocity_x, velocity_y, velocity_z, cell_indices, pressure_anchor, nx, ny, nz, h, dt, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"compute_pressure_rhs_kernel: "} + cudaGetErrorString(status)};
@@ -328,7 +325,7 @@ namespace kfs::cuda::operators::projection {
     void build_pressure_matrix(cudaStream_t stream, float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const std::uint32_t* flow_types) {
         const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
         constexpr unsigned block                     = 256u;
-        const unsigned grid                          = ceil_div_u32(count, block);
+        const unsigned grid                          = field::ceil_div_u32(count, block);
         const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
         build_pressure_matrix_kernel<<<grid, block, 0, stream>>>(values, row_offsets, column_indices, cell_indices, pressure_anchor, nx, ny, nz, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"build_pressure_matrix_kernel: "} + cudaGetErrorString(status)};
@@ -346,10 +343,7 @@ namespace kfs::cuda::operators::projection {
 
     void project_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_velocity) {
         constexpr dim3 block{8u, 8u, 4u};
-        const auto nx64                              = static_cast<std::uint64_t>(nx);
-        const auto ny64                              = static_cast<std::uint64_t>(ny);
-        const auto nz64                              = static_cast<std::uint64_t>(nz);
-        const dim3 grid                              = axis == 0u ? dim3(ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)) : axis == 1u ? dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)) : dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z));
+        const dim3 grid                              = field::staggered_grid(axis, nx, ny, nz, block);
         const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(flow_types, flow_velocity);
         if (axis == 0u) project_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 1u) project_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_H
+#define KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_H
 
 #include <array>
 #include <cstddef>
@@ -45,3 +46,5 @@ namespace kfs::cuda {
         void stats(cudaStream_t stream, const float* values, std::uint64_t count, ScalarStats& output);
     } // namespace field
 } // namespace kfs::cuda
+
+#endif // KEYFRAME_CONTROL_OF_SMOKE_SIMULATION_FIELD_H
