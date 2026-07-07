@@ -18,6 +18,9 @@ namespace kfs::cuda {
 
 namespace kfs::cuda::field {
     namespace {
+        constexpr std::uint32_t selection_marked   = 0u;
+        constexpr std::uint32_t selection_unmarked = 1u;
+
         unsigned ceil_div_u32(const std::uint64_t value, const std::uint64_t divisor) {
             return static_cast<unsigned>((value + divisor - 1u) / divisor);
         }
@@ -54,27 +57,55 @@ namespace kfs::cuda::field {
             values[index] = value;
         }
 
-        __global__ void copy_masked_kernel(float* destination, const float* source, const std::uint32_t* indices, const std::uint64_t count) {
+        __global__ void copy_index_selection_kernel(float* destination, const float* source, const std::uint32_t* indices, const std::uint32_t selection, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
-            if (indices[index] == 0u) return;
+            const bool marked = indices[index] != 0u;
+            if (selection == selection_marked && !marked) return;
+            if (selection == selection_unmarked && marked) return;
             destination[index] = source[index];
         }
 
-        __global__ void add_scaled_kernel(float* destination, const float* current, const float* source, const float scale, const std::uint64_t count) {
+        __global__ void add_kernel(float* destination, const float* left, const float* right, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            destination[index] = left[index] + right[index];
+        }
+
+        __global__ void add_linear_combination_kernel(float* destination, const float* current, const float* source, const float scale, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
             destination[index] = current[index] + scale * source[index];
         }
 
-        __global__ void add_unmasked_scalar_to_component_kernel(float* destination, const float* source, const std::uint32_t* indices, const float scale, const float bias, const std::uint64_t count) {
+        __global__ void add_index_selection_kernel(float* destination, const float* source, const std::uint32_t* indices, const float scale, const float bias, const std::uint32_t selection, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
-            if (indices[index] != 0u) return;
+            const bool marked = indices[index] != 0u;
+            if (selection == selection_marked && !marked) return;
+            if (selection == selection_unmarked && marked) return;
             destination[index] += scale * (source[index] + bias);
         }
 
-        __global__ void center_staggered_kernel(float* cx, float* cy, float* cz, const float* sx, const float* sy, const float* sz, const int nx, const int ny, const int nz) {
+        __global__ void subtract_kernel(float* destination, const float* left, const float* right, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            destination[index] = left[index] - right[index];
+        }
+
+        __global__ void multiply_kernel(float* destination, const float* left, const float* right, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            destination[index] = left[index] * right[index];
+        }
+
+        __global__ void scale_kernel(float* destination, const float* source, const float factor, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            destination[index] = factor * source[index];
+        }
+
+        __global__ void sample_kernel(float* cx, float* cy, float* cz, const float* sx, const float* sy, const float* sz, const int nx, const int ny, const int nz) {
             const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
             const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
             const int z = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -85,7 +116,7 @@ namespace kfs::cuda::field {
             cz[index]        = 0.5f * (sz[index_staggered_z(x, y, z, nx, ny)] + sz[index_staggered_z(x, y, z + 1, nx, ny)]);
         }
 
-        __global__ void add_centered_to_staggered_x_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
+        __global__ void accumulate_centered_on_staggered_x_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
             const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
             const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
             const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -104,7 +135,7 @@ namespace kfs::cuda::field {
             if (weight > 0.0f) destination[index_staggered_x(i, j, k, nx, ny)] += scale * (sum / weight);
         }
 
-        __global__ void add_centered_to_staggered_y_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
+        __global__ void accumulate_centered_on_staggered_y_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
             const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
             const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
             const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -123,7 +154,7 @@ namespace kfs::cuda::field {
             if (weight > 0.0f) destination[index_staggered_y(i, j, k, nx, ny)] += scale * (sum / weight);
         }
 
-        __global__ void add_centered_to_staggered_z_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
+        __global__ void accumulate_centered_on_staggered_z_kernel(float* destination, const float* source, const int nx, const int ny, const int nz, const float scale) {
             const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
             const int j = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
             const int k = static_cast<int>(blockIdx.z * blockDim.z + threadIdx.z);
@@ -153,42 +184,60 @@ namespace kfs::cuda::field {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_indexed_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void copy_masked(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count) {
-        copy_masked_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, count);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"copy_masked_kernel: "} + cudaGetErrorString(status)};
+    void copy(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count, const std::uint32_t selection) {
+        copy_index_selection_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, selection, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"copy_index_selection_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void add_scaled(cudaStream_t stream, float* const destination, const float* const current, const float* const source, const std::uint64_t count, const float scale) {
-        add_scaled_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, current, source, scale, count);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_scaled_kernel: "} + cudaGetErrorString(status)};
+    void add(cudaStream_t stream, float* const destination, const float* const left, const float* const right, const std::uint64_t count) {
+        add_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, left, right, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void add_unmasked_scalar_to_component(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count, const float scale, const float bias) {
-        add_unmasked_scalar_to_component_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, scale, bias, count);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_unmasked_scalar_to_component_kernel: "} + cudaGetErrorString(status)};
+    void add(cudaStream_t stream, float* const destination, const float* const current, const float* const source, const std::uint64_t count, const float scale) {
+        add_linear_combination_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, current, source, scale, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_linear_combination_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void center_staggered(cudaStream_t stream, float* const cx, float* const cy, float* const cz, const float* const sx, const float* const sy, const float* const sz, const std::array<std::int32_t, 3> resolution) {
+    void add(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count, const float scale, const float bias, const std::uint32_t selection) {
+        add_index_selection_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, scale, bias, selection, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_index_selection_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void subtract(cudaStream_t stream, float* const destination, const float* const left, const float* const right, const std::uint64_t count) {
+        subtract_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, left, right, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"subtract_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void multiply(cudaStream_t stream, float* const destination, const float* const left, const float* const right, const std::uint64_t count) {
+        multiply_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, left, right, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"multiply_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void scale(cudaStream_t stream, float* const destination, const float* const source, const std::uint64_t count, const float factor) {
+        scale_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, factor, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"scale_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void sample(cudaStream_t stream, float* const cx, float* const cy, float* const cz, const float* const sx, const float* const sy, const float* const sz, const std::array<std::int32_t, 3> resolution) {
         constexpr dim3 block{8u, 8u, 4u};
         const dim3 grid{
             ceil_div_u32(static_cast<std::uint64_t>(resolution[0]), block.x),
             ceil_div_u32(static_cast<std::uint64_t>(resolution[1]), block.y),
             ceil_div_u32(static_cast<std::uint64_t>(resolution[2]), block.z),
         };
-        center_staggered_kernel<<<grid, block, 0, stream>>>(cx, cy, cz, sx, sy, sz, resolution[0], resolution[1], resolution[2]);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"center_staggered_kernel: "} + cudaGetErrorString(status)};
+        sample_kernel<<<grid, block, 0, stream>>>(cx, cy, cz, sx, sy, sz, resolution[0], resolution[1], resolution[2]);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"sample_kernel: "} + cudaGetErrorString(status)};
     }
 
-    void add_centered_to_staggered(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t axis, const std::array<std::int32_t, 3> resolution, const float scale) {
-        if (axis >= 3u) throw std::runtime_error{"invalid axis"};
+    void add(cudaStream_t stream, float* const x, float* const y, float* const z, const float* const cx, const float* const cy, const float* const cz, const std::array<std::int32_t, 3> resolution, const float scale) {
         constexpr dim3 block{8u, 8u, 4u};
-        const auto nx   = static_cast<std::uint64_t>(resolution[0]);
-        const auto ny   = static_cast<std::uint64_t>(resolution[1]);
-        const auto nz   = static_cast<std::uint64_t>(resolution[2]);
-        const dim3 grid = axis == 0u ? dim3(ceil_div_u32(nx + 1u, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz, block.z)) : axis == 1u ? dim3(ceil_div_u32(nx, block.x), ceil_div_u32(ny + 1u, block.y), ceil_div_u32(nz, block.z)) : dim3(ceil_div_u32(nx, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz + 1u, block.z));
-        if (axis == 0u) add_centered_to_staggered_x_kernel<<<grid, block, 0, stream>>>(destination, source, resolution[0], resolution[1], resolution[2], scale);
-        if (axis == 1u) add_centered_to_staggered_y_kernel<<<grid, block, 0, stream>>>(destination, source, resolution[0], resolution[1], resolution[2], scale);
-        if (axis == 2u) add_centered_to_staggered_z_kernel<<<grid, block, 0, stream>>>(destination, source, resolution[0], resolution[1], resolution[2], scale);
-        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_centered_to_staggered_kernel: "} + cudaGetErrorString(status)};
+        const auto nx = static_cast<std::uint64_t>(resolution[0]);
+        const auto ny = static_cast<std::uint64_t>(resolution[1]);
+        const auto nz = static_cast<std::uint64_t>(resolution[2]);
+        accumulate_centered_on_staggered_x_kernel<<<dim3{ceil_div_u32(nx + 1u, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz, block.z)}, block, 0, stream>>>(x, cx, resolution[0], resolution[1], resolution[2], scale);
+        accumulate_centered_on_staggered_y_kernel<<<dim3{ceil_div_u32(nx, block.x), ceil_div_u32(ny + 1u, block.y), ceil_div_u32(nz, block.z)}, block, 0, stream>>>(y, cy, resolution[0], resolution[1], resolution[2], scale);
+        accumulate_centered_on_staggered_z_kernel<<<dim3{ceil_div_u32(nx, block.x), ceil_div_u32(ny, block.y), ceil_div_u32(nz + 1u, block.z)}, block, 0, stream>>>(z, cz, resolution[0], resolution[1], resolution[2], scale);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"accumulate_centered_on_staggered_kernel: "} + cudaGetErrorString(status)};
     }
 } // namespace kfs::cuda::field

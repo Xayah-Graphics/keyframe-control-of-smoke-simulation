@@ -1,12 +1,11 @@
 #include "keyframe.operators.emitter.h"
-
 #include <cmath>
 #include <stdexcept>
 #include <string>
 
 namespace {
     __global__ void emit_scalar_kernel(float* destination, const float* current, const int nx, const int ny, const int nz, const float cell_size, const float delta_seconds, const float center_x, const float center_y, const float center_z, const float radius_x, const float radius_y, const float radius_z, const float rate, const float falloff) {
-        const std::uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+        const std::uint32_t index      = blockIdx.x * blockDim.x + threadIdx.x;
         const std::uint32_t cell_count = static_cast<std::uint32_t>(nx) * static_cast<std::uint32_t>(ny) * static_cast<std::uint32_t>(nz);
         if (index >= cell_count) return;
 
@@ -27,13 +26,13 @@ namespace {
         }
 
         const float emission = expf(-falloff * r2);
-        destination[index] = current[index] + delta_seconds * rate * emission;
+        destination[index]   = current[index] + delta_seconds * rate * emission;
     }
 } // namespace
 
 namespace kfs::cuda::operators::emitter {
     void emit_scalar(const cudaStream_t stream, float* const destination, const float* const current, const int nx, const int ny, const int nz, const float cell_size, const float delta_seconds, const std::array<float, 3> center, const std::array<float, 3> radius, const float rate, const float falloff) {
-        constexpr std::uint32_t block = 256u;
+        constexpr std::uint32_t block  = 256u;
         const std::uint32_t cell_count = static_cast<std::uint32_t>(nx) * static_cast<std::uint32_t>(ny) * static_cast<std::uint32_t>(nz);
         emit_scalar_kernel<<<(cell_count + block - 1u) / block, block, 0, stream>>>(destination, current, nx, ny, nz, cell_size, delta_seconds, center[0], center[1], center[2], radius[0], radius[1], radius[2], rate, falloff);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"emit_scalar_kernel: "} + cudaGetErrorString(status)};

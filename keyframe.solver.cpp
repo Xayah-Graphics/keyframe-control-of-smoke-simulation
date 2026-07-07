@@ -13,21 +13,6 @@ import keyframe.operators.vorticity;
 
 namespace kfs::solver {
     namespace {
-        void validate_config(const Config& config) {
-            if (config.resolution[0] == 0 || config.resolution[1] == 0 || config.resolution[2] == 0) throw std::runtime_error("Keyframe smoke resolution must be positive");
-            if (config.resolution[0] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || config.resolution[1] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || config.resolution[2] > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke resolution exceeds CUDA solver int range");
-            if (config.cell_size <= 0.0f) throw std::runtime_error("Keyframe smoke cell_size must be positive");
-            if (config.pressure_iterations <= 0) throw std::runtime_error{"Keyframe smoke pressure_iterations must be positive"};
-            if (!std::isfinite(config.ambient_temperature)) throw std::runtime_error{"Keyframe smoke ambient_temperature must be finite"};
-            if (!std::isfinite(config.buoyancy_density_factor)) throw std::runtime_error{"Keyframe smoke buoyancy_density_factor must be finite"};
-            if (!std::isfinite(config.buoyancy_temperature_factor)) throw std::runtime_error{"Keyframe smoke buoyancy_temperature_factor must be finite"};
-            if (!std::isfinite(config.density_emission_rate) || config.density_emission_rate < 0.0f) throw std::runtime_error{"Keyframe smoke density_emission_rate must be finite and non-negative"};
-            if (!std::isfinite(config.temperature_emission_rate) || config.temperature_emission_rate < 0.0f) throw std::runtime_error{"Keyframe smoke temperature_emission_rate must be finite and non-negative"};
-
-            const std::uint64_t cell_count = static_cast<std::uint64_t>(config.resolution[0]) * static_cast<std::uint64_t>(config.resolution[1]) * static_cast<std::uint64_t>(config.resolution[2]);
-            if (cell_count == 0 || cell_count > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) throw std::runtime_error("Keyframe smoke cell count exceeds pressure solver int range");
-        }
-
         void initialize_host(Solver::HostData& host, const Config& config) {
             host.nx                          = static_cast<std::int32_t>(config.resolution[0]);
             host.ny                          = static_cast<std::int32_t>(config.resolution[1]);
@@ -98,7 +83,6 @@ namespace kfs::solver {
 
     Solver::Solver(const Config& config) {
         try {
-            validate_config(config);
             this->host   = {};
             this->device = {};
             initialize_host(this->host, config);
@@ -127,8 +111,6 @@ namespace kfs::solver {
 
     std::expected<StepStats, std::string> Solver::step(const StepRequest& request) {
         try {
-            if (!std::isfinite(request.delta_seconds) || request.delta_seconds < 0.0f) throw std::runtime_error{"Keyframe smoke delta_seconds must be finite and non-negative"};
-            if (request.iterations < 1) throw std::runtime_error{"Keyframe smoke step iterations must be positive"};
             auto& host                = this->host;
             auto& device              = this->device;
             const auto& flow_boundary = host.boundary.flow;
@@ -136,14 +118,14 @@ namespace kfs::solver {
             const float delta_seconds = request.delta_seconds;
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
-                    field::copy_masked(host.stream, device.temperature_data, device.solid_temperature, device.occupancy);
-                    field::center_staggered(host.stream, device.centered_velocity, device.velocity);
+                    field::copy(host.stream, device.temperature_data, device.solid_temperature, device.occupancy, field::IndexSelection::marked);
+                    field::sample(host.stream, device.centered_velocity, device.velocity);
                     field::fill(host.stream, device.force, 0.0f);
-                    field::add_unmasked_scalar_to_component(host.stream, device.force, 1u, device.density_data, device.occupancy, -host.buoyancy_density_factor, 0.0f);
-                    field::add_unmasked_scalar_to_component(host.stream, device.force, 1u, device.temperature_data, device.occupancy, host.buoyancy_temperature_factor, -host.ambient_temperature);
+                    field::add(host.stream, device.force, 1u, device.density_data, -host.buoyancy_density_factor, 0.0f, device.occupancy, field::IndexSelection::unmarked);
+                    field::add(host.stream, device.force, 1u, device.temperature_data, host.buoyancy_temperature_factor, -host.ambient_temperature, device.occupancy, field::IndexSelection::unmarked);
                     (*this->vorticity)(device.force, device.centered_velocity, device.occupancy);
+                    field::add(host.stream, device.velocity, device.force, delta_seconds);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-                        field::add_centered_to_staggered(host.stream, device.velocity, axis, device.force, delta_seconds);
                         boundary::enforce_staggered_boundary(host.stream, axis, device.velocity, device.occupancy, device.solid_velocity, flow_boundary);
                         if (flow_boundary.periodic[axis]) boundary::sync_periodic_staggered_component(host.stream, axis, device.velocity);
                     }
@@ -156,7 +138,7 @@ namespace kfs::solver {
                     (*this->emitter)(device.density_temp, device.density_data, host.density_emission_rate, delta_seconds);
                     (*this->emitter)(device.temperature_temp, device.temperature_data, host.temperature_emission_rate, delta_seconds);
                     (*this->advection)(device.temperature_data, device.temperature_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.temperature, flow_boundary);
-                    field::copy_masked(host.stream, device.temperature_data, device.solid_temperature, device.occupancy);
+                    field::copy(host.stream, device.temperature_data, device.solid_temperature, device.occupancy, field::IndexSelection::marked);
                     (*this->advection)(device.density_data, device.density_temp, device.velocity, device.occupancy, delta_seconds, host.boundary.density, flow_boundary);
                     boundary::boundary_fill_centered_scalar(host.stream, device.density_temp, device.density_data, device.occupancy, host.boundary.density);
                     field::copy(host.stream, device.density_data, device.density_temp);

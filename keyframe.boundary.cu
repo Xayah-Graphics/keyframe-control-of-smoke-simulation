@@ -228,8 +228,6 @@ namespace kfs::cuda::boundary {
     }
 
     void enforce_staggered_boundary(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const std::uint32_t* cell_indices, const float* solid_velocity_component, const int nx, const int ny, const int nz, const std::uint32_t* flow_types, const float* flow_velocity) {
-        if (axis >= 3u) throw std::runtime_error{"enforce_staggered_boundary: axis must be 0, 1, or 2"};
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
         const auto nx64             = static_cast<std::uint64_t>(nx);
         const auto ny64             = static_cast<std::uint64_t>(ny);
@@ -243,8 +241,6 @@ namespace kfs::cuda::boundary {
     }
 
     void sync_periodic_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const int nx, const int ny, const int nz) {
-        if (axis >= 3u) throw std::runtime_error{"sync_periodic_staggered_component: axis must be 0, 1, or 2"};
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 1u};
         const dim3 grid = axis == 0u ? dim3{ceil_div_u32(static_cast<std::uint64_t>(ny), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u} : axis == 1u ? dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(nz), block.y), 1u} : dim3{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), 1u};
         if (axis == 0u) sync_periodic_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, nx, ny, nz);
@@ -254,7 +250,6 @@ namespace kfs::cuda::boundary {
     }
 
     void boundary_fill_centered_scalar(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* cell_indices, const int nx, const int ny, const int nz, const std::uint32_t* scalar_boundary_types, const float* scalar_boundary_values) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Boundary launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
         const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const ScalarBoundary boundary = make_scalar_boundary(scalar_boundary_types, scalar_boundary_values);

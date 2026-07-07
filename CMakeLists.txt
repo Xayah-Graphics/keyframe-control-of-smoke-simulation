@@ -74,7 +74,6 @@ target_sources(
         keyframe.field.cu
         keyframe.field.cpp
         keyframe.field.h
-        keyframe.geometry.cpp
         keyframe.boundary.cpp
         keyframe.boundary.cu
         keyframe.boundary.h

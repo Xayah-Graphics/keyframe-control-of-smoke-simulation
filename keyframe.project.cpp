@@ -263,7 +263,7 @@ namespace kfs::project {
         std::uint64_t scene_revision{1u};
         std::uint64_t exported_density_revision{};
         std::uint64_t exported_density_byte_size{};
-        bool density_external_bound{};
+        bool density_external_ready{};
         bool host_update_running{};
     };
 
@@ -375,7 +375,7 @@ namespace kfs::project {
             rebuild_debug_attachments(state);
         }
 
-        void bind_density_external_storage(Project::State& state) {
+        void prepare_density_external_buffer(Project::State& state) {
             if (state.smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
             const inspector::SolverDeviceView view = inspector::Inspector{*state.smoke}.device_view();
             if (!view.initialized || view.density == nullptr || view.cell_count == 0u) throw std::runtime_error{"Keyframe smoke density field is not initialized."};
@@ -385,12 +385,10 @@ namespace kfs::project {
             float* const density_values = state.density_buffer.mapped_as<float>();
             if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
 
-            if (state.density_external_bound && view.density == density_values) return;
-            if (state.density_external_bound && view.density != density_values) throw std::runtime_error{"Keyframe smoke density external buffer changed after binding."};
-            state.smoke->device.density_data.bind_external({state.smoke->host.nx, state.smoke->host.ny, state.smoke->host.nz}, density_values);
-            field::fill(state.smoke->host.stream, state.smoke->device.density_data, 0.0f);
-            if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density external bind failed: "} + cudaGetErrorString(status)};
-            state.density_external_bound     = true;
+            if (state.density_external_ready) return;
+            if (const cudaError_t status = cudaMemsetAsync(density_values, 0, byte_size, state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemsetAsync Keyframe smoke density external buffer failed: "} + cudaGetErrorString(status)};
+            if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density external buffer failed: "} + cudaGetErrorString(status)};
+            state.density_external_ready     = true;
             state.exported_density_revision  = 0u;
             state.exported_density_byte_size = 0u;
             state.density_volume.reset();
@@ -404,7 +402,7 @@ namespace kfs::project {
                 return true;
             }
 
-            if (!state.density_external_bound) throw std::runtime_error{"Keyframe smoke density external buffer is not bound."};
+            if (!state.density_external_ready) throw std::runtime_error{"Keyframe smoke density external buffer is not ready."};
             const inspector::SolverDeviceView view = inspector::Inspector{*state.smoke}.device_view();
             if (!view.initialized || view.density == nullptr || view.cell_count == 0u) throw std::runtime_error{"Keyframe smoke density field is not initialized."};
             if (view.cell_count > std::numeric_limits<std::uint64_t>::max() / sizeof(float)) throw std::runtime_error{"Keyframe smoke density byte size overflows uint64."};
@@ -414,7 +412,7 @@ namespace kfs::project {
 
             float* const density_values = state.density_buffer.mapped_as<float>();
             if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
-            if (view.density != density_values) throw std::runtime_error{"Keyframe smoke density field is not backed by the Spectra external buffer."};
+            if (const cudaError_t status = cudaMemcpyAsync(density_values, view.density, byte_size, cudaMemcpyDeviceToDevice, state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaStreamSynchronize(state.smoke->host.stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
 
             state.density_volume = plugin::VolumeGrid{
@@ -499,7 +497,7 @@ namespace kfs::project {
         this->state->host_update_running = update.update_running;
         if (update.update_delta_seconds == 0.0) return;
 
-        bind_density_external_storage(*this->state);
+        prepare_density_external_buffer(*this->state);
         const std::expected<solver::StepStats, std::string> stats = this->state->smoke->step(solver::StepRequest{
             .delta_seconds = this->state->open.delta_seconds,
             .iterations    = this->state->open.steps_per_update,

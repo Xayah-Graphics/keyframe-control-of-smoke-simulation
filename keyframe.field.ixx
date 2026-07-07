@@ -5,9 +5,9 @@ export module keyframe.field;
 import std;
 
 export namespace kfs::field {
-    enum class ScalarFieldStorageKind : std::uint32_t {
-        owned    = 0u,
-        external = 1u,
+    enum class IndexSelection : std::uint32_t {
+        marked   = 0u,
+        unmarked = 1u,
     };
 
     struct ScalarField3D final {
@@ -22,11 +22,9 @@ export namespace kfs::field {
         [[nodiscard]] std::size_t bytes() const;
 
         void resize(std::array<std::int32_t, 3> resolution);
-        void bind_external(std::array<std::int32_t, 3> resolution, float* data);
 
         std::array<std::int32_t, 3> resolution;
         float* data{nullptr};
-        ScalarFieldStorageKind storage_kind{ScalarFieldStorageKind::owned};
     };
 
     struct IndexedField3D final {
@@ -84,22 +82,43 @@ export namespace kfs::field {
     void fill(cudaStream_t stream, IndexedField3D& values, std::uint32_t value);
     void fill(cudaStream_t stream, CenteredVectorField3D& values, float value);
     void fill(cudaStream_t stream, StaggeredVectorField3D& values, float value);
+
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source);
     void copy(cudaStream_t stream, IndexedField3D& destination, const IndexedField3D& source);
-    void copy_masked(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices);
+    void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices, IndexSelection selection);
     void copy(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source);
     void copy(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source);
-    void copy_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source);
-    void copy_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const StaggeredVectorField3D& source);
-    void add_scaled(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, float scale);
-    void add_unmasked_scalar_to_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, const IndexedField3D& indices, float scale, float bias);
-    void add_scaled(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, float scale);
-    void add_scaled(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, float scale);
+
     void upload(cudaStream_t stream, ScalarField3D& destination, std::span<const float> source);
+    void upload(cudaStream_t stream, IndexedField3D& destination, std::span<const std::uint32_t> source);
     void upload(cudaStream_t stream, CenteredVectorField3D& destination, std::array<std::span<const float>, 3> source);
     void upload(cudaStream_t stream, StaggeredVectorField3D& destination, std::array<std::span<const float>, 3> source);
-    void upload_component(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, std::span<const float> source);
-    void upload_component(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, std::span<const float> source);
-    void center_staggered(cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source);
-    void add_centered_to_staggered(cudaStream_t stream, StaggeredVectorField3D& destination, std::uint32_t axis, const CenteredVectorField3D& source, float scale);
+
+    void download(cudaStream_t stream, std::span<float> destination, const ScalarField3D& source);
+    void download(cudaStream_t stream, std::span<std::uint32_t> destination, const IndexedField3D& source);
+    void download(cudaStream_t stream, std::array<std::span<float>, 3> destination, const CenteredVectorField3D& source);
+    void download(cudaStream_t stream, std::array<std::span<float>, 3> destination, const StaggeredVectorField3D& source);
+
+    void add(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right);
+    void add(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, float scale);
+    void add(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, float scale, float bias, const IndexedField3D& indices, IndexSelection selection);
+    void add(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right);
+    void add(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, float scale);
+    void add(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right);
+    void add(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& current, const StaggeredVectorField3D& source, float scale);
+    void add(cudaStream_t stream, StaggeredVectorField3D& destination, const CenteredVectorField3D& source, float scale);
+
+    void subtract(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right);
+    void subtract(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right);
+    void subtract(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right);
+
+    void multiply(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right);
+    void multiply(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right);
+    void multiply(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right);
+
+    void scale(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, float factor);
+    void scale(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source, float factor);
+    void scale(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source, float factor);
+
+    void sample(cudaStream_t stream, CenteredVectorField3D& destination, const StaggeredVectorField3D& source);
 } // namespace kfs::field

@@ -156,14 +156,14 @@ namespace kfs::cuda::operators::projection {
             }
         }
 
-        int left_x                = i - 1;
-        int left_y                = j;
-        int left_z                = k;
-        int right_x               = i;
-        int right_y               = j;
-        int right_z               = k;
-        const bool has_left       = boundary::resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary_config);
-        const bool has_right      = boundary::resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary_config);
+        int left_x              = i - 1;
+        int left_y              = j;
+        int left_z              = k;
+        int right_x             = i;
+        int right_y             = j;
+        int right_z             = k;
+        const bool has_left     = boundary::resolve_cell_coordinates(left_x, left_y, left_z, nx, ny, nz, boundary_config);
+        const bool has_right    = boundary::resolve_cell_coordinates(right_x, right_y, right_z, nx, ny, nz, boundary_config);
         const bool left_marked  = has_left && cell_indices[boundary::index_3d(left_x, left_y, left_z, nx, ny)] != 0u;
         const bool right_marked = has_right && cell_indices[boundary::index_3d(right_x, right_y, right_z, nx, ny)] != 0u;
         if (left_marked || right_marked) {
@@ -215,14 +215,14 @@ namespace kfs::cuda::operators::projection {
             }
         }
 
-        int down_x               = i;
-        int down_y               = j - 1;
-        int down_z               = k;
-        int up_x                 = i;
-        int up_y                 = j;
-        int up_z                 = k;
-        const bool has_down      = boundary::resolve_cell_coordinates(down_x, down_y, down_z, nx, ny, nz, boundary_config);
-        const bool has_up        = boundary::resolve_cell_coordinates(up_x, up_y, up_z, nx, ny, nz, boundary_config);
+        int down_x             = i;
+        int down_y             = j - 1;
+        int down_z             = k;
+        int up_x               = i;
+        int up_y               = j;
+        int up_z               = k;
+        const bool has_down    = boundary::resolve_cell_coordinates(down_x, down_y, down_z, nx, ny, nz, boundary_config);
+        const bool has_up      = boundary::resolve_cell_coordinates(up_x, up_y, up_z, nx, ny, nz, boundary_config);
         const bool down_marked = has_down && cell_indices[boundary::index_3d(down_x, down_y, down_z, nx, ny)] != 0u;
         const bool up_marked   = has_up && cell_indices[boundary::index_3d(up_x, up_y, up_z, nx, ny)] != 0u;
         if (down_marked || up_marked) {
@@ -274,14 +274,14 @@ namespace kfs::cuda::operators::projection {
             }
         }
 
-        int back_x                = i;
-        int back_y                = j;
-        int back_z                = k - 1;
-        int front_x               = i;
-        int front_y               = j;
-        int front_z               = k;
-        const bool has_back       = boundary::resolve_cell_coordinates(back_x, back_y, back_z, nx, ny, nz, boundary_config);
-        const bool has_front      = boundary::resolve_cell_coordinates(front_x, front_y, front_z, nx, ny, nz, boundary_config);
+        int back_x              = i;
+        int back_y              = j;
+        int back_z              = k - 1;
+        int front_x             = i;
+        int front_y             = j;
+        int front_z             = k;
+        const bool has_back     = boundary::resolve_cell_coordinates(back_x, back_y, back_z, nx, ny, nz, boundary_config);
+        const bool has_front    = boundary::resolve_cell_coordinates(front_x, front_y, front_z, nx, ny, nz, boundary_config);
         const bool back_marked  = has_back && cell_indices[boundary::index_3d(back_x, back_y, back_z, nx, ny)] != 0u;
         const bool front_marked = has_front && cell_indices[boundary::index_3d(front_x, front_y, front_z, nx, ny)] != 0u;
         if (back_marked || front_marked) {
@@ -311,7 +311,6 @@ namespace kfs::cuda::operators::projection {
     }
 
     void find_pressure_anchor(cudaStream_t stream, int* pressure_anchor, const std::uint32_t* cell_indices, const std::uint64_t count) {
-        if (count == 0u) throw std::runtime_error{"Projection launch count must be positive"};
         constexpr unsigned block = 256u;
         const unsigned grid      = ceil_div_u32(count, block);
         find_pressure_anchor_kernel<<<grid, block, 0, stream>>>(pressure_anchor, cell_indices, count);
@@ -319,7 +318,6 @@ namespace kfs::cuda::operators::projection {
     }
 
     void compute_pressure_rhs(cudaStream_t stream, float* rhs, const float* velocity_x, const float* velocity_y, const float* velocity_z, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_pressure) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
         const dim3 grid{ceil_div_u32(static_cast<std::uint64_t>(nx), block.x), ceil_div_u32(static_cast<std::uint64_t>(ny), block.y), ceil_div_u32(static_cast<std::uint64_t>(nz), block.z)};
         const boundary::FlowBoundary boundary_config = boundary::make_flow_pressure_boundary(flow_types, flow_pressure);
@@ -328,11 +326,9 @@ namespace kfs::cuda::operators::projection {
     }
 
     void build_pressure_matrix(cudaStream_t stream, float* values, const int* row_offsets, const int* column_indices, const std::uint32_t* cell_indices, const int* pressure_anchor, const int nx, const int ny, const int nz, const std::uint32_t* flow_types) {
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
         const auto count = static_cast<std::uint64_t>(nx) * static_cast<std::uint64_t>(ny) * static_cast<std::uint64_t>(nz);
-        if (count == 0u) throw std::runtime_error{"Projection launch count must be positive"};
-        constexpr unsigned block = 256u;
-        const unsigned grid      = ceil_div_u32(count, block);
+        constexpr unsigned block                     = 256u;
+        const unsigned grid                          = ceil_div_u32(count, block);
         const boundary::FlowBoundary boundary_config = boundary::make_flow_type_boundary(flow_types);
         build_pressure_matrix_kernel<<<grid, block, 0, stream>>>(values, row_offsets, column_indices, cell_indices, pressure_anchor, nx, ny, nz, boundary_config);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"build_pressure_matrix_kernel: "} + cudaGetErrorString(status)};
@@ -349,13 +345,11 @@ namespace kfs::cuda::operators::projection {
     }
 
     void project_staggered_component(cudaStream_t stream, const std::uint32_t axis, float* velocity_component, const float* pressure, const std::uint32_t* cell_indices, const float* constraint_velocity_component, const int nx, const int ny, const int nz, const float h, const float dt, const std::uint32_t* flow_types, const float* flow_velocity) {
-        if (axis >= 3u) throw std::runtime_error{"project_staggered_component: axis must be 0, 1, or 2"};
-        if (nx <= 0 || ny <= 0 || nz <= 0) throw std::runtime_error{"Projection launch resolution must be positive"};
         constexpr dim3 block{8u, 8u, 4u};
-        const auto nx64 = static_cast<std::uint64_t>(nx);
-        const auto ny64 = static_cast<std::uint64_t>(ny);
-        const auto nz64 = static_cast<std::uint64_t>(nz);
-        const dim3 grid = axis == 0u ? dim3(ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)) : axis == 1u ? dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)) : dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z));
+        const auto nx64                              = static_cast<std::uint64_t>(nx);
+        const auto ny64                              = static_cast<std::uint64_t>(ny);
+        const auto nz64                              = static_cast<std::uint64_t>(nz);
+        const dim3 grid                              = axis == 0u ? dim3(ceil_div_u32(nx64 + 1u, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64, block.z)) : axis == 1u ? dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64 + 1u, block.y), ceil_div_u32(nz64, block.z)) : dim3(ceil_div_u32(nx64, block.x), ceil_div_u32(ny64, block.y), ceil_div_u32(nz64 + 1u, block.z));
         const boundary::FlowBoundary boundary_config = boundary::make_flow_velocity_boundary(flow_types, flow_velocity);
         if (axis == 0u) project_velocity_x_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
         if (axis == 1u) project_velocity_y_kernel<<<grid, block, 0, stream>>>(velocity_component, pressure, cell_indices, constraint_velocity_component, nx, ny, nz, h, dt, boundary_config);
