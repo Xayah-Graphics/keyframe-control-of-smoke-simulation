@@ -6,42 +6,6 @@ import std;
 import xayah.core.field;
 
 namespace xayah::core::boundary {
-    ScalarBoundaryFace fixed_value(const float value) noexcept {
-        return ScalarBoundaryFace{ScalarBoundaryMode::fixed_value, value};
-    }
-
-    ScalarBoundaryFace zero_gradient() noexcept {
-        return ScalarBoundaryFace{ScalarBoundaryMode::zero_gradient, 0.0f};
-    }
-
-    ScalarBoundaryFace periodic_scalar() noexcept {
-        return ScalarBoundaryFace{ScalarBoundaryMode::periodic, 0.0f};
-    }
-
-    VectorBoundaryFace fixed_value(const std::array<float, 3> value) noexcept {
-        return VectorBoundaryFace{VectorBoundaryMode::fixed_value, value};
-    }
-
-    VectorBoundaryFace zero_gradient_vector() noexcept {
-        return VectorBoundaryFace{VectorBoundaryMode::zero_gradient, {}};
-    }
-
-    VectorBoundaryFace no_slip(const std::array<float, 3> value) noexcept {
-        return VectorBoundaryFace{VectorBoundaryMode::fixed_value, value};
-    }
-
-    VectorBoundaryFace free_slip(const std::array<float, 3> value) noexcept {
-        return VectorBoundaryFace{VectorBoundaryMode::normal_fixed_tangent_zero_gradient, value};
-    }
-
-    VectorBoundaryFace outflow() noexcept {
-        return VectorBoundaryFace{VectorBoundaryMode::zero_gradient, {}};
-    }
-
-    VectorBoundaryFace periodic_vector() noexcept {
-        return VectorBoundaryFace{VectorBoundaryMode::periodic, {}};
-    }
-
     PackedScalarBoundary3D pack(const ScalarBoundary3D& boundary) {
         return PackedScalarBoundary3D{
             .modes =

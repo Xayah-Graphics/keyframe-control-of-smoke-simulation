@@ -130,7 +130,7 @@ namespace xayah::operators::advection::cuda {
         if (cell_x == nx) cell_x = nx - 1;
         if (cell_y == ny) cell_y = ny - 1;
         if (cell_z == nz) cell_z = nz - 1;
-        return !core::boundary::cuda::cell_in_bounds(cell_x, cell_y, cell_z, nx, ny, nz) || cell_indices[core::field::cuda::index(cell_x, cell_y, cell_z, nx, ny)] != 0u;
+        return cell_x < 0 || cell_x >= nx || cell_y < 0 || cell_y >= ny || cell_z < 0 || cell_z >= nz || cell_indices[core::field::cuda::index(cell_x, cell_y, cell_z, nx, ny)] != 0u;
     }
 
     __device__ float3 trace_rk2(const float3 start, const float* x_component, const float* y_component, const float* z_component, const std::uint32_t* cell_indices, const float dt, const int nx, const int ny, const int nz, const float h, const core::boundary::cuda::VectorBoundary3D boundary_config) {

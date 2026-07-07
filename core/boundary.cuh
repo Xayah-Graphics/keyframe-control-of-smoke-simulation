@@ -78,16 +78,6 @@ namespace xayah::core::boundary::cuda {
         return value < low ? low : (value > high ? high : value);
     }
 
-    __device__ inline bool cell_in_bounds(const int x, const int y, const int z, const int nx, const int ny, const int nz) {
-        return x >= 0 && x < nx && y >= 0 && y < ny && z >= 0 && z < nz;
-    }
-
-    __device__ inline VectorBoundaryFace3D vector_face(const VectorBoundary3D boundary, const std::uint32_t dimension, const bool lower) {
-        if (dimension == 0u) return lower ? boundary.x_min : boundary.x_max;
-        if (dimension == 1u) return lower ? boundary.y_min : boundary.y_max;
-        return lower ? boundary.z_min : boundary.z_max;
-    }
-
     __device__ inline bool scalar_periodic_pair(const ScalarBoundary3D boundary, const std::uint32_t dimension) {
         if (dimension == 0u) return boundary.x_min.mode == scalar_boundary_periodic && boundary.x_max.mode == scalar_boundary_periodic;
         if (dimension == 1u) return boundary.y_min.mode == scalar_boundary_periodic && boundary.y_max.mode == scalar_boundary_periodic;
@@ -98,12 +88,6 @@ namespace xayah::core::boundary::cuda {
         if (dimension == 0u) return boundary.x_min.mode == vector_boundary_periodic && boundary.x_max.mode == vector_boundary_periodic;
         if (dimension == 1u) return boundary.y_min.mode == vector_boundary_periodic && boundary.y_max.mode == vector_boundary_periodic;
         return boundary.z_min.mode == vector_boundary_periodic && boundary.z_max.mode == vector_boundary_periodic;
-    }
-
-    __device__ inline float vector_face_value(const VectorBoundaryFace3D face, const std::uint32_t axis) {
-        if (axis == 0u) return face.value_x;
-        if (axis == 1u) return face.value_y;
-        return face.value_z;
     }
 
     __device__ inline float wrap_periodic_position(float value, const int cells, const float h, const bool periodic) {
@@ -132,14 +116,14 @@ namespace xayah::core::boundary::cuda {
         if (vector_periodic_pair(boundary, 0u) && nx > 0) x = wrap_index(x, nx);
         if (vector_periodic_pair(boundary, 1u) && ny > 0) y = wrap_index(y, ny);
         if (vector_periodic_pair(boundary, 2u) && nz > 0) z = wrap_index(z, nz);
-        return cell_in_bounds(x, y, z, nx, ny, nz);
+        return x >= 0 && x < nx && y >= 0 && y < ny && z >= 0 && z < nz;
     }
 
     __device__ inline bool resolve_cell_coordinates(int& x, int& y, int& z, const int nx, const int ny, const int nz, const ScalarBoundary3D boundary) {
         if (scalar_periodic_pair(boundary, 0u) && nx > 0) x = wrap_index(x, nx);
         if (scalar_periodic_pair(boundary, 1u) && ny > 0) y = wrap_index(y, ny);
         if (scalar_periodic_pair(boundary, 2u) && nz > 0) z = wrap_index(z, nz);
-        return cell_in_bounds(x, y, z, nx, ny, nz);
+        return x >= 0 && x < nx && y >= 0 && y < ny && z >= 0 && z < nz;
     }
 
     __device__ inline bool cell_is_marked(const std::uint32_t* cell_indices, int x, int y, int z, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
@@ -179,16 +163,19 @@ namespace xayah::core::boundary::cuda {
     }
 
     __device__ inline float load_staggered_component_boundary(const float* values, const std::uint32_t axis, const std::uint32_t boundary_dimension, const bool lower, int i, int j, int k, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
-        const VectorBoundaryFace3D face = vector_face(boundary, boundary_dimension, lower);
-        i                               = clamp_int(i, 0, field::cuda::extent(axis, 0u, nx, ny, nz) - 1);
-        j                               = clamp_int(j, 0, field::cuda::extent(axis, 1u, nx, ny, nz) - 1);
-        k                               = clamp_int(k, 0, field::cuda::extent(axis, 2u, nx, ny, nz) - 1);
+        VectorBoundaryFace3D face = lower ? boundary.z_min : boundary.z_max;
+        if (boundary_dimension == 0u) face = lower ? boundary.x_min : boundary.x_max;
+        if (boundary_dimension == 1u) face = lower ? boundary.y_min : boundary.y_max;
+        i = clamp_int(i, 0, field::cuda::extent(axis, 0u, nx, ny, nz) - 1);
+        j = clamp_int(j, 0, field::cuda::extent(axis, 1u, nx, ny, nz) - 1);
+        k = clamp_int(k, 0, field::cuda::extent(axis, 2u, nx, ny, nz) - 1);
         if (boundary_dimension == 0u) i = lower ? 0 : field::cuda::extent(axis, 0u, nx, ny, nz) - 1;
         if (boundary_dimension == 1u) j = lower ? 0 : field::cuda::extent(axis, 1u, nx, ny, nz) - 1;
         if (boundary_dimension == 2u) k = lower ? 0 : field::cuda::extent(axis, 2u, nx, ny, nz) - 1;
         const float interior = values[field::cuda::index(axis, i, j, k, nx, ny)];
         if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != boundary_dimension)) return interior;
-        return 2.0f * vector_face_value(face, axis) - interior;
+        const float boundary_value = axis == 0u ? face.value_x : axis == 1u ? face.value_y : face.value_z;
+        return 2.0f * boundary_value - interior;
     }
 
     __device__ inline float load_staggered_component(const float* values, const std::uint32_t axis, int i, int j, int k, const int nx, const int ny, const int nz, const VectorBoundary3D boundary) {
@@ -243,7 +230,8 @@ namespace xayah::core::boundary::cuda {
             } else {
                 const float interior = values[field::cuda::index(x < 0 ? 0 : nx - 1, clamp_int(y, 0, ny - 1), clamp_int(z, 0, nz - 1), nx, ny)];
                 if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != 0u)) return interior;
-                return 2.0f * vector_face_value(face, axis) - interior;
+                const float boundary_value = axis == 0u ? face.value_x : axis == 1u ? face.value_y : face.value_z;
+                return 2.0f * boundary_value - interior;
             }
         }
         if (y < 0 || y >= ny) {
@@ -253,7 +241,8 @@ namespace xayah::core::boundary::cuda {
             } else {
                 const float interior = values[field::cuda::index(clamp_int(x, 0, nx - 1), y < 0 ? 0 : ny - 1, clamp_int(z, 0, nz - 1), nx, ny)];
                 if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != 1u)) return interior;
-                return 2.0f * vector_face_value(face, axis) - interior;
+                const float boundary_value = axis == 0u ? face.value_x : axis == 1u ? face.value_y : face.value_z;
+                return 2.0f * boundary_value - interior;
             }
         }
         if (z < 0 || z >= nz) {
@@ -263,7 +252,8 @@ namespace xayah::core::boundary::cuda {
             } else {
                 const float interior = values[field::cuda::index(clamp_int(x, 0, nx - 1), clamp_int(y, 0, ny - 1), z < 0 ? 0 : nz - 1, nx, ny)];
                 if (face.mode == vector_boundary_zero_gradient || (face.mode == vector_boundary_normal_fixed_tangent_zero_gradient && axis != 2u)) return interior;
-                return 2.0f * vector_face_value(face, axis) - interior;
+                const float boundary_value = axis == 0u ? face.value_x : axis == 1u ? face.value_y : face.value_z;
+                return 2.0f * boundary_value - interior;
             }
         }
         return values[field::cuda::index(x, y, z, nx, ny)];

@@ -16,7 +16,7 @@ namespace xayah::core::boundary::cuda {
                 if (face.mode == vector_boundary_zero_gradient && nx > 0)
                     face_value = component[field::cuda::index(0u, 1, j, k, nx, ny)];
                 else
-                    face_value = vector_face_value(face, 0u);
+                    face_value = face.value_x;
                 return;
             }
         }
@@ -25,7 +25,7 @@ namespace xayah::core::boundary::cuda {
                 if (face.mode == vector_boundary_zero_gradient && nx > 0)
                     face_value = component[field::cuda::index(0u, nx - 1, j, k, nx, ny)];
                 else
-                    face_value = vector_face_value(face, 0u);
+                    face_value = face.value_x;
                 return;
             }
         }
@@ -66,7 +66,7 @@ namespace xayah::core::boundary::cuda {
                 if (face.mode == vector_boundary_zero_gradient && ny > 0)
                     face_value = component[field::cuda::index(1u, i, 1, k, nx, ny)];
                 else
-                    face_value = vector_face_value(face, 1u);
+                    face_value = face.value_y;
                 return;
             }
         }
@@ -75,7 +75,7 @@ namespace xayah::core::boundary::cuda {
                 if (face.mode == vector_boundary_zero_gradient && ny > 0)
                     face_value = component[field::cuda::index(1u, i, ny - 1, k, nx, ny)];
                 else
-                    face_value = vector_face_value(face, 1u);
+                    face_value = face.value_y;
                 return;
             }
         }
@@ -116,7 +116,7 @@ namespace xayah::core::boundary::cuda {
                 if (face.mode == vector_boundary_zero_gradient && nz > 0)
                     face_value = component[field::cuda::index(2u, i, j, 1, nx, ny)];
                 else
-                    face_value = vector_face_value(face, 2u);
+                    face_value = face.value_z;
                 return;
             }
         }
@@ -125,7 +125,7 @@ namespace xayah::core::boundary::cuda {
                 if (face.mode == vector_boundary_zero_gradient && nz > 0)
                     face_value = component[field::cuda::index(2u, i, j, nz - 1, nx, ny)];
                 else
-                    face_value = vector_face_value(face, 2u);
+                    face_value = face.value_z;
                 return;
             }
         }

@@ -14,36 +14,36 @@ export import xayah.operators.vorticity;
 namespace kfs::solver {
     export struct SmokeBoundary final {
         xayah::core::boundary::VectorBoundary3D velocity{
-            .x_min = xayah::core::boundary::periodic_vector(),
-            .x_max = xayah::core::boundary::periodic_vector(),
-            .y_min = xayah::core::boundary::no_slip(),
-            .y_max = xayah::core::boundary::outflow(),
-            .z_min = xayah::core::boundary::periodic_vector(),
-            .z_max = xayah::core::boundary::periodic_vector(),
+            .x_min = {.mode = xayah::core::boundary::VectorBoundaryMode::periodic},
+            .x_max = {.mode = xayah::core::boundary::VectorBoundaryMode::periodic},
+            .y_min = {.mode = xayah::core::boundary::VectorBoundaryMode::fixed_value, .value = {0.0f, 0.0f, 0.0f}},
+            .y_max = {},
+            .z_min = {.mode = xayah::core::boundary::VectorBoundaryMode::periodic},
+            .z_max = {.mode = xayah::core::boundary::VectorBoundaryMode::periodic},
         };
         xayah::core::boundary::ScalarBoundary3D pressure{
-            .x_min = xayah::core::boundary::periodic_scalar(),
-            .x_max = xayah::core::boundary::periodic_scalar(),
-            .y_min = xayah::core::boundary::zero_gradient(),
-            .y_max = xayah::core::boundary::fixed_value(0.0f),
-            .z_min = xayah::core::boundary::periodic_scalar(),
-            .z_max = xayah::core::boundary::periodic_scalar(),
+            .x_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .x_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .y_min = {},
+            .y_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::fixed_value, .value = 0.0f},
+            .z_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .z_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
         };
         xayah::core::boundary::ScalarBoundary3D density{
-            .x_min = xayah::core::boundary::periodic_scalar(),
-            .x_max = xayah::core::boundary::periodic_scalar(),
-            .y_min = xayah::core::boundary::fixed_value(0.0f),
-            .y_max = xayah::core::boundary::fixed_value(0.0f),
-            .z_min = xayah::core::boundary::periodic_scalar(),
-            .z_max = xayah::core::boundary::periodic_scalar(),
+            .x_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .x_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .y_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::fixed_value, .value = 0.0f},
+            .y_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::fixed_value, .value = 0.0f},
+            .z_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .z_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
         };
         xayah::core::boundary::ScalarBoundary3D temperature{
-            .x_min = xayah::core::boundary::periodic_scalar(),
-            .x_max = xayah::core::boundary::periodic_scalar(),
-            .y_min = xayah::core::boundary::fixed_value(0.0f),
-            .y_max = xayah::core::boundary::fixed_value(0.0f),
-            .z_min = xayah::core::boundary::periodic_scalar(),
-            .z_max = xayah::core::boundary::periodic_scalar(),
+            .x_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .x_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .y_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::fixed_value, .value = 0.0f},
+            .y_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::fixed_value, .value = 0.0f},
+            .z_min = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
+            .z_max = {.mode = xayah::core::boundary::ScalarBoundaryMode::periodic},
         };
     };
 

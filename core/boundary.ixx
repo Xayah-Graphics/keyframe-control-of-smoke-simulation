@@ -29,17 +29,6 @@ export namespace xayah::core::boundary {
         std::array<float, 3> value{};
     };
 
-    [[nodiscard]] ScalarBoundaryFace fixed_value(float value) noexcept;
-    [[nodiscard]] ScalarBoundaryFace zero_gradient() noexcept;
-    [[nodiscard]] ScalarBoundaryFace periodic_scalar() noexcept;
-
-    [[nodiscard]] VectorBoundaryFace fixed_value(std::array<float, 3> value) noexcept;
-    [[nodiscard]] VectorBoundaryFace zero_gradient_vector() noexcept;
-    [[nodiscard]] VectorBoundaryFace no_slip(std::array<float, 3> value = {0.0f, 0.0f, 0.0f}) noexcept;
-    [[nodiscard]] VectorBoundaryFace free_slip(std::array<float, 3> value = {0.0f, 0.0f, 0.0f}) noexcept;
-    [[nodiscard]] VectorBoundaryFace outflow() noexcept;
-    [[nodiscard]] VectorBoundaryFace periodic_vector() noexcept;
-
     struct ScalarBoundary3D final {
         ScalarBoundaryFace x_min{};
         ScalarBoundaryFace x_max{};
