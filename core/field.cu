@@ -38,6 +38,19 @@ namespace xayah::core::field::cuda {
             values[index] = value;
         }
 
+        __global__ void fill_bitfield_kernel(std::uint32_t* words, const std::uint64_t cell_count, const std::uint64_t word_count, const bool value) {
+            const auto word_index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (word_index >= word_count) return;
+            if (!value) {
+                words[word_index] = 0u;
+                return;
+            }
+
+            const std::uint64_t first_cell = word_index * 32u;
+            const std::uint64_t remaining  = cell_count - first_cell;
+            words[word_index]              = remaining >= 32u ? 0xffffffffu : (1u << static_cast<std::uint32_t>(remaining)) - 1u;
+        }
+
         __global__ void copy_index_selection_kernel(float* destination, const float* source, const std::uint32_t* indices, const std::uint32_t selection, const std::uint64_t count) {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
@@ -45,6 +58,29 @@ namespace xayah::core::field::cuda {
             if (selection == selection_marked && !marked) return;
             if (selection == selection_unmarked && marked) return;
             destination[index] = source[index];
+        }
+
+        __global__ void copy_bit_selection_kernel(float* destination, const float* source, const std::uint32_t* words, const std::uint32_t selection, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            const bool marked = (words[index / 32u] & (1u << static_cast<std::uint32_t>(index % 32u))) != 0u;
+            if (selection == selection_marked && !marked) return;
+            if (selection == selection_unmarked && marked) return;
+            destination[index] = source[index];
+        }
+
+        __global__ void pack_indexed_bitfield_kernel(std::uint32_t* destination_words, const std::uint32_t* source_indices, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            if (source_indices[index] == 0u) return;
+            atomicOr(destination_words + index / 32u, 1u << static_cast<std::uint32_t>(index % 32u));
+        }
+
+        __global__ void unpack_indexed_bitfield_kernel(std::uint32_t* destination_indices, const std::uint32_t* source_words, const std::uint64_t count, const std::uint32_t marked_value) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            const bool marked          = (source_words[index / 32u] & (1u << static_cast<std::uint32_t>(index % 32u))) != 0u;
+            destination_indices[index] = marked ? marked_value : 0u;
         }
 
         __global__ void add_kernel(float* destination, const float* left, const float* right, const std::uint64_t count) {
@@ -63,6 +99,15 @@ namespace xayah::core::field::cuda {
             const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
             if (index >= count) return;
             const bool marked = indices[index] != 0u;
+            if (selection == selection_marked && !marked) return;
+            if (selection == selection_unmarked && marked) return;
+            destination[index] += scale * (source[index] + bias);
+        }
+
+        __global__ void add_bit_selection_kernel(float* destination, const float* source, const std::uint32_t* words, const float scale, const float bias, const std::uint32_t selection, const std::uint64_t count) {
+            const auto index = static_cast<std::uint64_t>(blockIdx.x) * static_cast<std::uint64_t>(blockDim.x) + static_cast<std::uint64_t>(threadIdx.x);
+            if (index >= count) return;
+            const bool marked = (words[index / 32u] & (1u << static_cast<std::uint32_t>(index % 32u))) != 0u;
             if (selection == selection_marked && !marked) return;
             if (selection == selection_unmarked && marked) return;
             destination[index] += scale * (source[index] + bias);
@@ -220,9 +265,35 @@ namespace xayah::core::field::cuda {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_indexed_kernel: "} + cudaGetErrorString(status)};
     }
 
+    void fill_bits(cudaStream_t stream, std::uint32_t* const words, const std::uint64_t count, const bool value) {
+        if (count == 0u) return;
+        const std::uint64_t word_count = (count + 31u) / 32u;
+        fill_bitfield_kernel<<<ceil_div_u32(word_count, 256u), 256u, 0, stream>>>(words, count, word_count, value);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"fill_bitfield_kernel: "} + cudaGetErrorString(status)};
+    }
+
     void copy(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count, const std::uint32_t selection) {
         copy_index_selection_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, selection, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"copy_index_selection_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void copy_bits(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const words, const std::uint64_t count, const std::uint32_t selection) {
+        if (count == 0u) return;
+        copy_bit_selection_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, words, selection, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"copy_bit_selection_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void pack(cudaStream_t stream, std::uint32_t* const destination_words, const std::uint32_t* const source_indices, const std::uint64_t count) {
+        if (count == 0u) return;
+        fill(stream, destination_words, (count + 31u) / 32u, 0u);
+        pack_indexed_bitfield_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination_words, source_indices, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"pack_indexed_bitfield_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void unpack(cudaStream_t stream, std::uint32_t* const destination_indices, const std::uint32_t* const source_words, const std::uint64_t count, const std::uint32_t marked_value) {
+        if (count == 0u) return;
+        unpack_indexed_bitfield_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination_indices, source_words, count, marked_value);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"unpack_indexed_bitfield_kernel: "} + cudaGetErrorString(status)};
     }
 
     void add(cudaStream_t stream, float* const destination, const float* const left, const float* const right, const std::uint64_t count) {
@@ -238,6 +309,12 @@ namespace xayah::core::field::cuda {
     void add(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const indices, const std::uint64_t count, const float scale, const float bias, const std::uint32_t selection) {
         add_index_selection_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, indices, scale, bias, selection, count);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_index_selection_kernel: "} + cudaGetErrorString(status)};
+    }
+
+    void add_bits(cudaStream_t stream, float* const destination, const float* const source, const std::uint32_t* const words, const std::uint64_t count, const float scale, const float bias, const std::uint32_t selection) {
+        if (count == 0u) return;
+        add_bit_selection_kernel<<<ceil_div_u32(count, 256u), 256u, 0, stream>>>(destination, source, words, scale, bias, selection, count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"add_bit_selection_kernel: "} + cudaGetErrorString(status)};
     }
 
     void add(cudaStream_t stream, float* const x, float* const y, float* const z, const float* const cx, const float* const cy, const float* const cz, const std::array<std::int32_t, 3> resolution, const float scale) {

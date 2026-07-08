@@ -51,11 +51,11 @@ namespace kfs::solver {
             this->colliders.rasterize(stream, device.cell_indices, device.constraint_velocity, device.constraint_scalar, this->cell_size);
             if (delta_seconds > 0.0f) {
                 for (std::int32_t iteration = 0; iteration < request.iterations; ++iteration) {
-                    xayah::core::field::copy(stream, device.temperature_data, device.constraint_scalar, device.cell_indices, xayah::core::field::IndexSelection::marked);
+                    xayah::core::field::copy(stream, device.temperature_data, device.constraint_scalar, device.cell_indices, xayah::core::field::Selection::marked);
                     xayah::core::field::sample(stream, device.centered_velocity, device.velocity);
                     xayah::core::field::fill(stream, device.force, 0.0f);
-                    xayah::core::field::add(stream, device.force, 1u, device.density_data, -this->buoyancy_density_factor, 0.0f, device.cell_indices, xayah::core::field::IndexSelection::unmarked);
-                    xayah::core::field::add(stream, device.force, 1u, device.temperature_data, this->buoyancy_temperature_factor, -this->ambient_temperature, device.cell_indices, xayah::core::field::IndexSelection::unmarked);
+                    xayah::core::field::add(stream, device.force, 1u, device.density_data, -this->buoyancy_density_factor, 0.0f, device.cell_indices, xayah::core::field::Selection::unmarked);
+                    xayah::core::field::add(stream, device.force, 1u, device.temperature_data, this->buoyancy_temperature_factor, -this->ambient_temperature, device.cell_indices, xayah::core::field::Selection::unmarked);
                     this->vorticity(device.force, device.centered_velocity, device.cell_indices, velocity_boundary);
                     xayah::core::field::add(stream, device.velocity, device.force, delta_seconds);
                     for (std::uint32_t axis = 0; axis < 3u; ++axis) {
@@ -71,7 +71,7 @@ namespace kfs::solver {
                     this->emitter(device.density_temp, device.density_data, this->density_emission_rate, delta_seconds);
                     this->emitter(device.temperature_temp, device.temperature_data, this->temperature_emission_rate, delta_seconds);
                     this->advection(device.temperature_data, device.temperature_temp, device.velocity, device.cell_indices, delta_seconds, temperature_boundary, velocity_boundary);
-                    xayah::core::field::copy(stream, device.temperature_data, device.constraint_scalar, device.cell_indices, xayah::core::field::IndexSelection::marked);
+                    xayah::core::field::copy(stream, device.temperature_data, device.constraint_scalar, device.cell_indices, xayah::core::field::Selection::marked);
                     this->advection(device.density_data, device.density_temp, device.velocity, device.cell_indices, delta_seconds, density_boundary, velocity_boundary);
                     xayah::core::boundary::extrapolate(stream, device.density_temp, device.density_data, device.cell_indices, density_boundary);
                     xayah::core::field::copy(stream, device.density_data, device.density_temp);

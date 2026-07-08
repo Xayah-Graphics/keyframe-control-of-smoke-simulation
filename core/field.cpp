@@ -109,6 +109,57 @@ namespace xayah::core::field {
         this->resolution = resolution;
     }
 
+    BitField3D::BitField3D(const std::array<std::int32_t, 3> resolution) : resolution{} {
+        this->resize(resolution);
+    }
+
+    BitField3D::~BitField3D() noexcept {
+        cuda::free_device_buffers(this->data);
+        this->resolution = {};
+    }
+
+    BitField3D::BitField3D(BitField3D&& other) noexcept : resolution{std::exchange(other.resolution, std::array<std::int32_t, 3>{})}, data{std::exchange(other.data, nullptr)} {}
+
+    BitField3D& BitField3D::operator=(BitField3D&& other) noexcept {
+        if (this == &other) return *this;
+        cuda::free_device_buffers(this->data);
+        this->resolution = std::exchange(other.resolution, std::array<std::int32_t, 3>{});
+        this->data       = std::exchange(other.data, nullptr);
+        return *this;
+    }
+
+    [[nodiscard]] std::uint64_t BitField3D::count() const {
+        return cell_element_count(this->resolution);
+    }
+
+    [[nodiscard]] std::uint64_t BitField3D::word_count() const {
+        return BitField3D::word_count(cell_element_count(this->resolution));
+    }
+
+    [[nodiscard]] std::size_t BitField3D::bytes() const {
+        return this->word_count() * sizeof(std::uint32_t);
+    }
+
+    [[nodiscard]] std::uint64_t BitField3D::word_count(const std::uint64_t cell_count) {
+        return (cell_count + 31u) / 32u;
+    }
+
+    void BitField3D::resize(const std::array<std::int32_t, 3> resolution) {
+        if (this->resolution == resolution) return;
+        if (resolution[0] == 0 && resolution[1] == 0 && resolution[2] == 0) {
+            cuda::free_device_buffers(this->data);
+            this->resolution = {};
+            return;
+        }
+
+        const std::uint64_t cells = cell_element_count(resolution);
+        std::uint32_t* next       = nullptr;
+        if (const cudaError_t status = cudaMalloc(reinterpret_cast<void**>(&next), BitField3D::word_count(cells) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc bit field: "} + cudaGetErrorString(status)};
+        cuda::free_device_buffers(this->data);
+        this->data       = next;
+        this->resolution = resolution;
+    }
+
     CenteredVectorField3D::CenteredVectorField3D(const std::array<std::int32_t, 3> resolution) : resolution{} {
         this->resize(resolution);
     }
@@ -214,6 +265,10 @@ namespace xayah::core::field {
         cuda::fill(stream, values.data, values.count(), value);
     }
 
+    void fill(const cudaStream_t stream, BitField3D& values, const bool value) {
+        cuda::fill_bits(stream, values.data, values.count(), value);
+    }
+
     void fill(const cudaStream_t stream, CenteredVectorField3D& values, const float value) {
         for (std::uint32_t axis = 0u; axis < 3u; ++axis) cuda::fill(stream, values.data[axis], values.count(), value);
     }
@@ -230,8 +285,16 @@ namespace xayah::core::field {
         if (const cudaError_t status = cudaMemcpyAsync(destination.data, source.data, destination.bytes(), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync indexed copy: "} + cudaGetErrorString(status)};
     }
 
-    void copy(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices, const IndexSelection selection) {
+    void copy(const cudaStream_t stream, BitField3D& destination, const BitField3D& source) {
+        if (const cudaError_t status = cudaMemcpyAsync(destination.data, source.data, destination.bytes(), cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync bit field copy: "} + cudaGetErrorString(status)};
+    }
+
+    void copy(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices, const Selection selection) {
         cuda::copy(stream, destination.data, source.data, indices.data, destination.count(), static_cast<std::uint32_t>(selection));
+    }
+
+    void copy(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const BitField3D& bits, const Selection selection) {
+        cuda::copy_bits(stream, destination.data, source.data, bits.data, destination.count(), static_cast<std::uint32_t>(selection));
     }
 
     void copy(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source) {
@@ -252,6 +315,10 @@ namespace xayah::core::field {
         if (const cudaError_t status = cudaMemcpyAsync(destination.data, source.data(), destination.bytes(), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync indexed upload: "} + cudaGetErrorString(status)};
     }
 
+    void upload(const cudaStream_t stream, BitField3D& destination, const std::span<const std::uint32_t> packed_words) {
+        if (const cudaError_t status = cudaMemcpyAsync(destination.data, packed_words.data(), destination.bytes(), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync bit field upload: "} + cudaGetErrorString(status)};
+    }
+
     void upload(const cudaStream_t stream, CenteredVectorField3D& destination, const std::array<std::span<const float>, 3> source) {
         for (std::uint32_t axis = 0u; axis < 3u; ++axis)
             if (const cudaError_t status = cudaMemcpyAsync(destination.data[axis], source[axis].data(), destination.bytes(), cudaMemcpyHostToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector upload: "} + cudaGetErrorString(status)};
@@ -270,6 +337,10 @@ namespace xayah::core::field {
         if (const cudaError_t status = cudaMemcpyAsync(destination.data(), source.data, source.bytes(), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync indexed download: "} + cudaGetErrorString(status)};
     }
 
+    void download(const cudaStream_t stream, const std::span<std::uint32_t> packed_words, const BitField3D& source) {
+        if (const cudaError_t status = cudaMemcpyAsync(packed_words.data(), source.data, source.bytes(), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync bit field download: "} + cudaGetErrorString(status)};
+    }
+
     void download(const cudaStream_t stream, const std::array<std::span<float>, 3> destination, const CenteredVectorField3D& source) {
         for (std::uint32_t axis = 0u; axis < 3u; ++axis)
             if (const cudaError_t status = cudaMemcpyAsync(destination[axis].data(), source.data[axis], source.bytes(), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync centered vector download: "} + cudaGetErrorString(status)};
@@ -280,6 +351,18 @@ namespace xayah::core::field {
             if (const cudaError_t status = cudaMemcpyAsync(destination[axis].data(), source.data[axis], source.bytes(axis), cudaMemcpyDeviceToHost, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync staggered vector download: "} + cudaGetErrorString(status)};
     }
 
+    void pack(const cudaStream_t stream, BitField3D& destination, const IndexedField3D& source) {
+        cuda::pack(stream, destination.data, source.data, source.count());
+    }
+
+    void pack(const cudaStream_t stream, std::uint32_t* const destination_words, const IndexedField3D& source) {
+        cuda::pack(stream, destination_words, source.data, source.count());
+    }
+
+    void unpack(const cudaStream_t stream, IndexedField3D& destination, const BitField3D& source, const std::uint32_t marked_value) {
+        cuda::unpack(stream, destination.data, source.data, destination.count(), marked_value);
+    }
+
     void add(const cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right) {
         cuda::add(stream, destination.data, left.data, right.data, destination.count());
     }
@@ -288,8 +371,12 @@ namespace xayah::core::field {
         cuda::add(stream, destination.data, current.data, source.data, destination.count(), scale);
     }
 
-    void add(const cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const float scale, const float bias, const IndexedField3D& indices, const IndexSelection selection) {
+    void add(const cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const float scale, const float bias, const IndexedField3D& indices, const Selection selection) {
         cuda::add(stream, destination.data[axis], source.data, indices.data, destination.count(), scale, bias, static_cast<std::uint32_t>(selection));
+    }
+
+    void add(const cudaStream_t stream, CenteredVectorField3D& destination, const std::uint32_t axis, const ScalarField3D& source, const float scale, const float bias, const BitField3D& bits, const Selection selection) {
+        cuda::add_bits(stream, destination.data[axis], source.data, bits.data, destination.count(), scale, bias, static_cast<std::uint32_t>(selection));
     }
 
     void add(const cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right) {

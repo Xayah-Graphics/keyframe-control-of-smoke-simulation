@@ -5,7 +5,7 @@ export module xayah.core.field;
 import std;
 
 export namespace xayah::core::field {
-    enum class IndexSelection : std::uint32_t {
+    enum class Selection : std::uint32_t {
         marked   = 0u,
         unmarked = 1u,
     };
@@ -37,6 +37,25 @@ export namespace xayah::core::field {
 
         [[nodiscard]] std::uint64_t count() const;
         [[nodiscard]] std::size_t bytes() const;
+
+        void resize(std::array<std::int32_t, 3> resolution);
+
+        std::array<std::int32_t, 3> resolution;
+        std::uint32_t* data{nullptr};
+    };
+
+    struct BitField3D final {
+        explicit BitField3D(std::array<std::int32_t, 3> resolution);
+        ~BitField3D() noexcept;
+        BitField3D(const BitField3D&)            = delete;
+        BitField3D& operator=(const BitField3D&) = delete;
+        BitField3D(BitField3D&& other) noexcept;
+        BitField3D& operator=(BitField3D&& other) noexcept;
+
+        [[nodiscard]] std::uint64_t count() const;
+        [[nodiscard]] std::uint64_t word_count() const;
+        [[nodiscard]] std::size_t bytes() const;
+        [[nodiscard]] static std::uint64_t word_count(std::uint64_t cell_count);
 
         void resize(std::array<std::int32_t, 3> resolution);
 
@@ -88,28 +107,38 @@ export namespace xayah::core::field {
 
     void fill(cudaStream_t stream, ScalarField3D& values, float value);
     void fill(cudaStream_t stream, IndexedField3D& values, std::uint32_t value);
+    void fill(cudaStream_t stream, BitField3D& values, bool value);
     void fill(cudaStream_t stream, CenteredVectorField3D& values, float value);
     void fill(cudaStream_t stream, StaggeredVectorField3D& values, float value);
 
     void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source);
     void copy(cudaStream_t stream, IndexedField3D& destination, const IndexedField3D& source);
-    void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices, IndexSelection selection);
+    void copy(cudaStream_t stream, BitField3D& destination, const BitField3D& source);
+    void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const IndexedField3D& indices, Selection selection);
+    void copy(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& source, const BitField3D& bits, Selection selection);
     void copy(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& source);
     void copy(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& source);
 
     void upload(cudaStream_t stream, ScalarField3D& destination, std::span<const float> source);
     void upload(cudaStream_t stream, IndexedField3D& destination, std::span<const std::uint32_t> source);
+    void upload(cudaStream_t stream, BitField3D& destination, std::span<const std::uint32_t> packed_words);
     void upload(cudaStream_t stream, CenteredVectorField3D& destination, std::array<std::span<const float>, 3> source);
     void upload(cudaStream_t stream, StaggeredVectorField3D& destination, std::array<std::span<const float>, 3> source);
 
     void download(cudaStream_t stream, std::span<float> destination, const ScalarField3D& source);
     void download(cudaStream_t stream, std::span<std::uint32_t> destination, const IndexedField3D& source);
+    void download(cudaStream_t stream, std::span<std::uint32_t> packed_words, const BitField3D& source);
     void download(cudaStream_t stream, std::array<std::span<float>, 3> destination, const CenteredVectorField3D& source);
     void download(cudaStream_t stream, std::array<std::span<float>, 3> destination, const StaggeredVectorField3D& source);
 
+    void pack(cudaStream_t stream, BitField3D& destination, const IndexedField3D& source);
+    void pack(cudaStream_t stream, std::uint32_t* destination_words, const IndexedField3D& source);
+    void unpack(cudaStream_t stream, IndexedField3D& destination, const BitField3D& source, std::uint32_t marked_value);
+
     void add(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& left, const ScalarField3D& right);
     void add(cudaStream_t stream, ScalarField3D& destination, const ScalarField3D& current, const ScalarField3D& source, float scale);
-    void add(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, float scale, float bias, const IndexedField3D& indices, IndexSelection selection);
+    void add(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, float scale, float bias, const IndexedField3D& indices, Selection selection);
+    void add(cudaStream_t stream, CenteredVectorField3D& destination, std::uint32_t axis, const ScalarField3D& source, float scale, float bias, const BitField3D& bits, Selection selection);
     void add(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& left, const CenteredVectorField3D& right);
     void add(cudaStream_t stream, CenteredVectorField3D& destination, const CenteredVectorField3D& current, const CenteredVectorField3D& source, float scale);
     void add(cudaStream_t stream, StaggeredVectorField3D& destination, const StaggeredVectorField3D& left, const StaggeredVectorField3D& right);

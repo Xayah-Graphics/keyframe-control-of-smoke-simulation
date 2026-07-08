@@ -387,6 +387,7 @@ export namespace kfs::plugin {
         ViewportVoxelGridIndexEncoding index_encoding{ViewportVoxelGridIndexEncoding::Linear};
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
+        std::uint64_t index_count{};
         std::uint64_t revision{};
     };
 
@@ -725,6 +726,14 @@ export namespace kfs::plugin {
         const std::from_chars_result result = std::from_chars(begin, end, value);
         if (result.ec != std::errc{} || result.ptr != end) throw std::runtime_error(std::format("expected unsigned integer setting value, got '{}'", text));
         return value;
+    }
+
+    template <typename Project>
+    [[nodiscard]] SettingBinding<Project> choice_value(std::string key, std::string label, const std::initializer_list<std::string> values, std::string default_value, void (Project::*handler)(std::string_view)) {
+        return SettingBinding<Project>{
+            .schema = choice(std::move(key), std::move(label), values).defaulted(std::move(default_value)),
+            .update = [handler](Project& project, const std::string_view value) { (project.*handler)(value); },
+        };
     }
 
     template <typename Project>
@@ -1701,6 +1710,7 @@ namespace kfs::plugin {
                 .index_encoding   = static_cast<std::uint32_t>(grid.index_encoding),
                 .buffer_id        = grid.buffer_id,
                 .source_byte_size = grid.source_byte_size,
+                .index_count      = grid.index_count,
                 .revision         = grid.revision,
             };
             view.dimensions[0] = grid.dimensions[0];

@@ -20,12 +20,18 @@ namespace xayah::core::field::cuda {
 
     void fill(cudaStream_t stream, float* values, std::uint64_t count, float value);
     void fill(cudaStream_t stream, std::uint32_t* values, std::uint64_t count, std::uint32_t value);
+    void fill_bits(cudaStream_t stream, std::uint32_t* words, std::uint64_t count, bool value);
 
     void copy(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* indices, std::uint64_t count, std::uint32_t selection);
+    void copy_bits(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* words, std::uint64_t count, std::uint32_t selection);
+
+    void pack(cudaStream_t stream, std::uint32_t* destination_words, const std::uint32_t* source_indices, std::uint64_t count);
+    void unpack(cudaStream_t stream, std::uint32_t* destination_indices, const std::uint32_t* source_words, std::uint64_t count, std::uint32_t marked_value);
 
     void add(cudaStream_t stream, float* destination, const float* left, const float* right, std::uint64_t count);
     void add(cudaStream_t stream, float* destination, const float* current, const float* source, std::uint64_t count, float scale);
     void add(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* indices, std::uint64_t count, float scale, float bias, std::uint32_t selection);
+    void add_bits(cudaStream_t stream, float* destination, const float* source, const std::uint32_t* words, std::uint64_t count, float scale, float bias, std::uint32_t selection);
     void add(cudaStream_t stream, float* staggered_x, float* staggered_y, float* staggered_z, const float* centered_x, const float* centered_y, const float* centered_z, std::array<std::int32_t, 3> resolution, float scale);
 
     void subtract(cudaStream_t stream, float* destination, const float* left, const float* right, std::uint64_t count);
