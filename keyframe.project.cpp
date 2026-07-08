@@ -692,13 +692,24 @@ namespace kfs::project {
         [[nodiscard]] std::vector<plugin::Material> scene_materials(const DisplaySettings& display) {
             return {
                 plugin::Material{
-                    .name                     = volume_material_name,
-                    .model                    = "volume",
-                    .alpha_mode               = "blend",
-                    .base_color               = {1.0f, 1.0f, 1.0f, 1.0f},
-                    .roughness                = 0.35f,
-                    .volume_density_scale     = display.show_density || display.show_temperature ? display.density_scale : 0.0f,
-                    .volume_temperature_scale = display.show_temperature ? display.temperature_scale : 0.0f,
+                    .name       = volume_material_name,
+                    .model      = "volume",
+                    .alpha_mode = "blend",
+                    .base_color = {1.0f, 1.0f, 1.0f, 1.0f},
+                    .roughness  = 0.35f,
+                    .volume     = plugin::VolumeMaterial{
+                        .mode = plugin::VolumeMaterialMode::Medium,
+                        .density = plugin::VolumeChannelBinding{
+                            .channel_name = "density",
+                            .scale        = display.show_density || display.show_temperature ? display.density_scale : 0.0f,
+                            .enabled      = true,
+                        },
+                        .emission = plugin::VolumeChannelBinding{
+                            .channel_name = "temperature",
+                            .scale        = display.show_temperature ? display.temperature_scale : 0.0f,
+                            .enabled      = display.show_temperature,
+                        },
+                    },
                 },
                 plugin::Material{
                     .name       = emitter_material_name,

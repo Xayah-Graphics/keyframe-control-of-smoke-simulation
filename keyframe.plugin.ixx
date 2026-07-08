@@ -265,14 +265,34 @@ export namespace kfs::plugin {
         std::optional<CameraImage> image{};
     };
 
+    enum class VolumeMaterialMode : std::uint32_t {
+        Medium      = 0u,
+        ScalarDebug = 1u,
+    };
+
+    struct VolumeChannelBinding {
+        std::string channel_name{};
+        std::uint32_t component{};
+        float scale{1.0f};
+        float bias{};
+        bool enabled{};
+    };
+
+    struct VolumeMaterial {
+        VolumeMaterialMode mode{VolumeMaterialMode::Medium};
+        VolumeChannelBinding density{.channel_name = "density", .scale = 0.08f, .enabled = true};
+        VolumeChannelBinding emission{};
+        VolumeChannelBinding color{};
+        VolumeChannelBinding debug_scalar{};
+    };
+
     struct Material {
         std::string name{};
         std::string model{"volume"};
         std::string alpha_mode{"blend"};
         std::array<float, 4u> base_color{1.0f, 1.0f, 1.0f, 1.0f};
         float roughness{0.5f};
-        float volume_density_scale{1.0f};
-        float volume_temperature_scale{1.0f};
+        VolumeMaterial volume{};
     };
 
     struct Light {
@@ -340,7 +360,9 @@ export namespace kfs::plugin {
 
     enum class VolumeChannelFormat : std::uint32_t {
         Float32   = 0u,
-        Float32x3 = 1u,
+        Float32x2 = 1u,
+        Float32x3 = 2u,
+        Float32x4 = 3u,
     };
 
     struct VolumeChannel {
@@ -1014,6 +1036,14 @@ namespace kfs::plugin {
         float scale[3]{};
     };
 
+    struct SpectraSceneVolumeChannelBinding {
+        const char* channel_name{};
+        std::uint32_t component{};
+        float scale{};
+        float bias{};
+        std::uint32_t enabled{};
+    };
+
     struct SpectraSceneMaterial {
         const char* name{};
         const char* model{};
@@ -1024,8 +1054,11 @@ namespace kfs::plugin {
         float roughness{};
         float metallic{};
         float alpha_cutoff{};
-        float volume_density_scale{};
-        float volume_temperature_scale{};
+        std::uint32_t volume_mode{};
+        SpectraSceneVolumeChannelBinding volume_density{};
+        SpectraSceneVolumeChannelBinding volume_emission{};
+        SpectraSceneVolumeChannelBinding volume_color{};
+        SpectraSceneVolumeChannelBinding volume_debug_scalar{};
     };
 
     struct SpectraSceneMaterialSpan {
@@ -1525,15 +1558,28 @@ namespace kfs::plugin {
             };
         }
 
+        [[nodiscard]] SpectraSceneVolumeChannelBinding make_volume_binding_view(const VolumeChannelBinding& binding) {
+            return SpectraSceneVolumeChannelBinding{
+                .channel_name = binding.channel_name.c_str(),
+                .component    = binding.component,
+                .scale        = binding.scale,
+                .bias         = binding.bias,
+                .enabled      = binding.enabled ? 1u : 0u,
+            };
+        }
+
         [[nodiscard]] SpectraSceneMaterial make_material_view(const Material& material) {
             SpectraSceneMaterial view{
-                .name                     = material.name.c_str(),
-                .model                    = material.model.c_str(),
-                .alpha_mode               = material.alpha_mode.c_str(),
-                .roughness                = material.roughness,
-                .alpha_cutoff             = 0.5f,
-                .volume_density_scale     = material.volume_density_scale,
-                .volume_temperature_scale = material.volume_temperature_scale,
+                .name                = material.name.c_str(),
+                .model               = material.model.c_str(),
+                .alpha_mode          = material.alpha_mode.c_str(),
+                .roughness           = material.roughness,
+                .alpha_cutoff        = 0.5f,
+                .volume_mode         = static_cast<std::uint32_t>(material.volume.mode),
+                .volume_density      = make_volume_binding_view(material.volume.density),
+                .volume_emission     = make_volume_binding_view(material.volume.emission),
+                .volume_color        = make_volume_binding_view(material.volume.color),
+                .volume_debug_scalar = make_volume_binding_view(material.volume.debug_scalar),
             };
             copy_array(view.base_color, material.base_color);
             return view;
