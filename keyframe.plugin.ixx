@@ -156,7 +156,7 @@ export namespace kfs::plugin {
     };
 
     struct HostServices {
-        std::move_only_function<GpuBufferAllocation(std::uint32_t, std::uint64_t, std::string_view)> request_gpu_buffer{};
+        std::move_only_function<GpuBufferAllocation(std::uint32_t, std::uint64_t)> request_gpu_buffer{};
         std::move_only_function<void(std::uint64_t)> release_gpu_buffer{};
     };
 
@@ -203,7 +203,6 @@ export namespace kfs::plugin {
     };
 
     struct FrameInfo {
-        double delta_seconds{};
         double time_seconds{};
         std::uint64_t frame_index{};
     };
@@ -330,7 +329,6 @@ export namespace kfs::plugin {
 
     struct Point {
         std::array<float, 3u> position{};
-        std::array<float, 3u> normal{0.0f, 0.0f, 1.0f};
         std::array<float, 4u> color{1.0f, 1.0f, 1.0f, 1.0f};
         float radius{0.01f};
     };
@@ -342,7 +340,6 @@ export namespace kfs::plugin {
         std::uint64_t point_count{};
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
-        std::uint64_t revision{};
         std::string material_name{};
         Transform transform{};
         std::optional<Bounds> bounds{};
@@ -367,14 +364,12 @@ export namespace kfs::plugin {
 
     struct VolumeChannel {
         std::string name{};
-        std::array<std::uint32_t, 3u> dimensions{};
         VolumeChannelFormat format{VolumeChannelFormat::Float32};
         VolumeChannelSourceKind source_kind{VolumeChannelSourceKind::Values};
         VolumeChannelIndexEncoding index_encoding{VolumeChannelIndexEncoding::Linear};
         std::uint64_t buffer_id{};
         std::uintptr_t external_device_pointer{};
         std::uint64_t source_byte_size{};
-        std::uint64_t revision{};
     };
 
     struct VolumeGrid {
@@ -410,7 +405,6 @@ export namespace kfs::plugin {
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
         std::uint64_t index_count{};
-        std::uint64_t revision{};
     };
 
     enum class ViewportSegmentSourceKind : std::uint32_t {
@@ -447,7 +441,6 @@ export namespace kfs::plugin {
         std::uint64_t segment_count{};
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
-        std::uint64_t revision{};
         float width{1.0f};
         ViewportSegmentWidthMode width_mode{ViewportSegmentWidthMode::Screen};
         ViewportSegmentDepthMode depth_mode{ViewportSegmentDepthMode::DepthTested};
@@ -863,7 +856,7 @@ export namespace kfs::plugin {
 } // namespace kfs::plugin
 
 namespace kfs::plugin {
-    constexpr std::uint32_t plugin_abi_version = 17u;
+    constexpr std::uint32_t plugin_abi_version = 18u;
     typedef void SpectraSceneInstance;
 
     typedef std::uint32_t SpectraSceneResult;
@@ -998,7 +991,6 @@ namespace kfs::plugin {
         std::uint64_t struct_size{};
         std::uint32_t kind{};
         std::uint64_t byte_size{};
-        const char* debug_name{};
     };
 
     struct SpectraSceneGpuBufferAllocation {
@@ -1155,7 +1147,6 @@ namespace kfs::plugin {
 
     struct SpectraScenePoint {
         float position[3]{};
-        float normal[3]{};
         float color[4]{};
         float radius{};
     };
@@ -1172,7 +1163,6 @@ namespace kfs::plugin {
         std::uint64_t point_count{};
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
-        std::uint64_t revision{};
         const char* material_name{};
         SpectraSceneTransform transform{};
         float bounds_min[3]{};
@@ -1192,7 +1182,6 @@ namespace kfs::plugin {
 
     struct SpectraSceneVolumeChannel {
         const char* name{};
-        std::uint32_t dimensions[3]{};
         SpectraSceneFloatSpan values{};
         std::uint32_t format{};
         std::uint32_t source_kind{};
@@ -1200,7 +1189,6 @@ namespace kfs::plugin {
         std::uint64_t buffer_id{};
         std::uintptr_t external_device_pointer{};
         std::uint64_t source_byte_size{};
-        std::uint64_t revision{};
     };
 
     struct SpectraSceneVolumeChannelSpan {
@@ -1256,7 +1244,6 @@ namespace kfs::plugin {
         std::uint64_t segment_count{};
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
-        std::uint64_t revision{};
         float width{};
         std::uint32_t width_mode{};
         std::uint32_t depth_mode{};
@@ -1282,7 +1269,6 @@ namespace kfs::plugin {
         std::uint64_t buffer_id{};
         std::uint64_t source_byte_size{};
         std::uint64_t index_count{};
-        std::uint64_t revision{};
     };
 
     struct SpectraSceneViewportVoxelGridSpan {
@@ -1332,7 +1318,6 @@ namespace kfs::plugin {
     };
 
     struct SpectraSceneFrameInfo {
-        double delta_seconds{};
         double time_seconds{};
         std::uint64_t frame_index{};
     };
@@ -1650,7 +1635,6 @@ namespace kfs::plugin {
                         .radius = point.radius,
                     };
                     copy_array(point_view.position, point.position);
-                    copy_array(point_view.normal, point.normal);
                     copy_array(point_view.color, point.color);
                     cache.point_storage[cloud_index].push_back(point_view);
                 }
@@ -1661,7 +1645,6 @@ namespace kfs::plugin {
                     .point_count      = point_cloud.point_count,
                     .buffer_id        = point_cloud.buffer_id,
                     .source_byte_size = point_cloud.source_byte_size,
-                    .revision         = point_cloud.revision,
                     .material_name    = point_cloud.material_name.c_str(),
                     .transform        = make_transform_view(point_cloud.transform),
                     .bounds_min       = {},
@@ -1692,11 +1675,7 @@ namespace kfs::plugin {
                         .buffer_id               = channel.buffer_id,
                         .external_device_pointer = channel.external_device_pointer,
                         .source_byte_size        = channel.source_byte_size,
-                        .revision                = channel.revision,
                     };
-                    channel_view.dimensions[0] = channel.dimensions[0];
-                    channel_view.dimensions[1] = channel.dimensions[1];
-                    channel_view.dimensions[2] = channel.dimensions[2];
                     cache.volume_channel_storage[volume_index].push_back(channel_view);
                 }
 
@@ -1757,7 +1736,6 @@ namespace kfs::plugin {
                 .buffer_id        = grid.buffer_id,
                 .source_byte_size = grid.source_byte_size,
                 .index_count      = grid.index_count,
-                .revision         = grid.revision,
             };
             view.dimensions[0] = grid.dimensions[0];
             view.dimensions[1] = grid.dimensions[1];
@@ -1803,7 +1781,6 @@ namespace kfs::plugin {
                     .segment_count    = segment_set.segment_count,
                     .buffer_id        = segment_set.buffer_id,
                     .source_byte_size = segment_set.source_byte_size,
-                    .revision         = segment_set.revision,
                     .width            = segment_set.width,
                     .width_mode       = static_cast<std::uint32_t>(segment_set.width_mode),
                     .depth_mode       = static_cast<std::uint32_t>(segment_set.depth_mode),
@@ -1975,8 +1952,7 @@ namespace kfs::plugin {
                 if (open_info->host_services->last_error == nullptr) throw std::runtime_error("scene plugin host services last_error function is null");
                 const SpectraSceneHostServices* host_services_view = open_info->host_services;
                 auto host_services                                 = std::make_shared<HostServices>();
-                host_services->request_gpu_buffer                  = [host_services_view](const std::uint32_t kind, const std::uint64_t byte_size, const std::string_view debug_name) {
-                    const std::string debug_name_text{debug_name};
+                host_services->request_gpu_buffer                  = [host_services_view](const std::uint32_t kind, const std::uint64_t byte_size) {
                     std::uint32_t abi_kind{};
                     switch (kind) {
                     case GpuBufferKindVolumeChannel: abi_kind = SPECTRA_SCENE_GPU_BUFFER_VOLUME_CHANNEL; break;
@@ -1989,7 +1965,6 @@ namespace kfs::plugin {
                                          .struct_size = sizeof(SpectraSceneGpuBufferRequest),
                                          .kind        = abi_kind,
                                          .byte_size   = byte_size,
-                                         .debug_name  = debug_name_text.c_str(),
                     };
                     SpectraSceneGpuBufferAllocation allocation{};
                     const SpectraSceneResult result = host_services_view->request_gpu_buffer(host_services_view->user_data, &request, &allocation);
@@ -2052,7 +2027,7 @@ namespace kfs::plugin {
                 if (snapshot == nullptr) throw std::runtime_error("frame output pointer is null");
                 plugin_instance.last_error.clear();
                 SceneBuilder builder{};
-                plugin_instance.definition->write_frame(plugin_instance.project, builder, FrameInfo{.delta_seconds = frame.delta_seconds, .time_seconds = frame.time_seconds, .frame_index = frame.frame_index});
+                plugin_instance.definition->write_frame(plugin_instance.project, builder, FrameInfo{.time_seconds = frame.time_seconds, .frame_index = frame.frame_index});
                 plugin_instance.scene_abi.document = builder.document();
                 *snapshot                          = make_frame_abi_view(plugin_instance.scene_abi);
                 return SPECTRA_SCENE_RESULT_OK;

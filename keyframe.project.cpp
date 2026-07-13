@@ -153,7 +153,7 @@ namespace kfs::project {
             ExternalGpuBuffer& operator=(ExternalGpuBuffer&&)      = delete;
             ~ExternalGpuBuffer() noexcept;
 
-            void ensure(std::shared_ptr<plugin::HostServices> host_services, std::uint32_t kind, std::uint64_t byte_size, std::string_view debug_name, std::string_view label);
+            void ensure(std::shared_ptr<plugin::HostServices> host_services, std::uint32_t kind, std::uint64_t byte_size, std::string_view label);
             void reset() noexcept;
 
             [[nodiscard]] bool has_capacity(std::uint64_t requested_byte_size) const noexcept;
@@ -597,37 +597,33 @@ namespace kfs::project {
             channels.reserve(2u);
             const cudaStream_t stream = state.smoke->stream;
             if (publish_density_channel) {
-                state.exports.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, density_bytes, "keyframe smoke density volume", "density volume");
+                state.exports.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, density_bytes, "density volume");
                 float* const density_values = state.exports.density_buffer.mapped_as<float>();
                 if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
                 if (const cudaError_t status = cudaMemcpyAsync(density_values, density.data, density_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
                 channels.push_back(plugin::VolumeChannel{
                     .name                    = "density",
-                    .dimensions              = dimensions,
                     .format                  = plugin::VolumeChannelFormat::Float32,
                     .source_kind             = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
                     .index_encoding          = plugin::VolumeChannelIndexEncoding::Linear,
                     .buffer_id               = state.exports.density_buffer.resource_id(),
                     .external_device_pointer = reinterpret_cast<std::uintptr_t>(density_values),
                     .source_byte_size        = density_bytes,
-                    .revision                = revision,
                 });
             }
             if (publish_temperature_channel) {
-                state.exports.temperature_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, temperature_bytes, "keyframe smoke temperature volume", "temperature volume");
+                state.exports.temperature_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, temperature_bytes, "temperature volume");
                 float* const temperature_values = state.exports.temperature_buffer.mapped_as<float>();
                 if (temperature_values == nullptr) throw std::runtime_error{"Keyframe smoke temperature external buffer was not mapped."};
                 if (const cudaError_t status = cudaMemcpyAsync(temperature_values, temperature.data, temperature_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke temperature volume failed: "} + cudaGetErrorString(status)};
                 channels.push_back(plugin::VolumeChannel{
                     .name                    = "temperature",
-                    .dimensions              = dimensions,
                     .format                  = plugin::VolumeChannelFormat::Float32,
                     .source_kind             = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
                     .index_encoding          = plugin::VolumeChannelIndexEncoding::Linear,
                     .buffer_id               = state.exports.temperature_buffer.resource_id(),
                     .external_device_pointer = reinterpret_cast<std::uintptr_t>(temperature_values),
                     .source_byte_size        = temperature_bytes,
-                    .revision                = revision,
                 });
             }
             if (channel_mask != 0u)
@@ -662,7 +658,7 @@ namespace kfs::project {
             const std::array dimensions          = std::array{static_cast<std::uint32_t>(indices.resolution[0]), static_cast<std::uint32_t>(indices.resolution[1]), static_cast<std::uint32_t>(indices.resolution[2])};
             if (state.exports.cell_indices.has_value() && state.exports.cell_indices_revision == revision && state.exports.cell_indices_byte_size == byte_size && state.exports.cell_indices->cell_scale == state.display.cell_index_cell_scale) return;
 
-            state.exports.cell_indices_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportVoxelGrid, byte_size, "keyframe cell indices bitfield", "cell indices");
+            state.exports.cell_indices_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportVoxelGrid, byte_size, "cell indices");
             std::uint32_t* const bitfield_words = state.exports.cell_indices_buffer.mapped_as<std::uint32_t>();
             if (bitfield_words == nullptr) throw std::runtime_error{"Keyframe cell index external buffer was not mapped."};
             const cudaStream_t stream = state.smoke->stream;
@@ -683,7 +679,6 @@ namespace kfs::project {
                 .buffer_id      = state.exports.cell_indices_buffer.resource_id(),
                 .source_byte_size = byte_size,
                 .index_count      = 0u,
-                .revision         = revision,
             };
             state.exports.cell_indices_revision  = revision;
             state.exports.cell_indices_byte_size = byte_size;
@@ -779,14 +774,14 @@ namespace kfs::project {
         return this->allocation.resource_id;
     }
 
-    void ExternalGpuBuffer::ensure(std::shared_ptr<plugin::HostServices> next_host_services, const std::uint32_t kind, const std::uint64_t requested_byte_size, const std::string_view debug_name, const std::string_view label) {
+    void ExternalGpuBuffer::ensure(std::shared_ptr<plugin::HostServices> next_host_services, const std::uint32_t kind, const std::uint64_t requested_byte_size, const std::string_view label) {
         if (this->has_capacity(requested_byte_size)) return;
         this->reset();
         if (next_host_services == nullptr) throw std::runtime_error{std::format("Spectra host services are required for {} visualization.", label)};
         if (requested_byte_size == 0u) throw std::runtime_error{std::format("{} byte size is invalid.", label)};
         if (!next_host_services->request_gpu_buffer) throw std::runtime_error{"Spectra host services request_gpu_buffer callback is not configured."};
         if (!next_host_services->release_gpu_buffer) throw std::runtime_error{"Spectra host services release_gpu_buffer callback is not configured."};
-        plugin::GpuBufferAllocation next_allocation = next_host_services->request_gpu_buffer(kind, requested_byte_size, debug_name);
+        plugin::GpuBufferAllocation next_allocation = next_host_services->request_gpu_buffer(kind, requested_byte_size);
         if (next_allocation.resource_id == 0u) throw std::runtime_error{std::format("Spectra returned an invalid {} resource id.", label)};
         if (next_allocation.kind != kind) throw std::runtime_error{std::format("Spectra returned an unexpected GPU buffer kind for {}.", label)};
         if (next_allocation.byte_size < requested_byte_size) {
@@ -1008,7 +1003,6 @@ namespace kfs::project {
 
     void Project::write_frame(plugin::SceneBuilder& scene, const plugin::FrameInfo frame) {
         if (this->state == nullptr || this->state->smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
-        if (!std::isfinite(frame.delta_seconds) || frame.delta_seconds < 0.0) throw std::runtime_error{"Keyframe smoke project frame delta time is invalid."};
         if (!std::isfinite(frame.time_seconds) || frame.time_seconds < 0.0) throw std::runtime_error{"Keyframe smoke project frame time is invalid."};
 
         publish_volume_channels(*this->state);
@@ -1368,6 +1362,6 @@ namespace kfs::project {
     }
 } // namespace kfs::project
 
-extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v17(void) -> decltype(kfs::plugin::export_plugin<kfs::project::Project>()) {
+extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v18(void) -> decltype(kfs::plugin::export_plugin<kfs::project::Project>()) {
     return kfs::plugin::export_plugin<kfs::project::Project>();
 }
