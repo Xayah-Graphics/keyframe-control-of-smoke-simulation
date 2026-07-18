@@ -160,15 +160,23 @@ namespace kfs::project {
             [[nodiscard]] std::uint64_t resource_id() const noexcept;
 
             template <typename Value>
-            [[nodiscard]] Value* mapped_as() const noexcept {
-                return static_cast<Value*>(this->mapped_buffer);
+            [[nodiscard]] Value* mapped_as(const std::uint32_t frame_slot_index) const noexcept {
+                return static_cast<Value*>(this->mapped_buffers[frame_slot_index]);
             }
+
+            [[nodiscard]] std::uint32_t frame_slot_count() const noexcept;
+            [[nodiscard]] std::uintptr_t ready_event(std::uint32_t frame_slot_index) const noexcept;
+            void record_ready(std::uint32_t frame_slot_index, cudaStream_t stream);
+            [[nodiscard]] std::uint64_t slot_revision(std::uint32_t frame_slot_index) const noexcept;
+            void set_slot_revision(std::uint32_t frame_slot_index, std::uint64_t revision) noexcept;
 
         private:
             std::shared_ptr<plugin::HostServices> host_services{};
             plugin::GpuBufferAllocation allocation{};
-            cudaExternalMemory_t external_memory{};
-            void* mapped_buffer{};
+            std::vector<cudaExternalMemory_t> external_memories{};
+            std::vector<void*> mapped_buffers{};
+            std::vector<cudaEvent_t> ready_events{};
+            std::vector<std::uint64_t> slot_revisions{};
             std::uint64_t byte_size{};
         };
 
@@ -278,13 +286,13 @@ namespace kfs::project {
             return std::ranges::any_of(bytes, [](const std::uint8_t value) { return value != 0u; });
         }
 
-        void close_imported_handle(plugin::GpuBufferAllocation& allocation) noexcept {
+        void close_imported_handle(plugin::GpuBufferSlotAllocation& slot) noexcept {
 #if defined(_WIN32)
-            if (allocation.handle_kind == plugin::GpuResourceHandleKind::OpaqueWin32 && allocation.handle != 0u) static_cast<void>(CloseHandle(reinterpret_cast<HANDLE>(allocation.handle)));
+            if (slot.handle_kind == plugin::GpuResourceHandleKind::OpaqueWin32 && slot.handle != 0u) static_cast<void>(CloseHandle(reinterpret_cast<HANDLE>(slot.handle)));
 #else
-            if (allocation.handle_kind == plugin::GpuResourceHandleKind::OpaqueFileDescriptor && allocation.handle != 0u) static_cast<void>(close(static_cast<int>(allocation.handle)));
+            if (slot.handle_kind == plugin::GpuResourceHandleKind::OpaqueFileDescriptor && slot.handle != 0u) static_cast<void>(close(static_cast<int>(slot.handle)));
 #endif
-            allocation.handle = 0u;
+            slot.handle = 0u;
         }
 
         void validate_cuda_device_identity(const plugin::GpuDeviceIdentity& identity) {
@@ -478,6 +486,7 @@ namespace kfs::project {
         std::optional<SmokeStats> latest_smoke_stats{};
         std::uint64_t scene_revision{1u};
         double simulation_time_seconds{};
+        std::uint32_t current_frame_slot_index{};
         bool host_update_running{};
     };
 
@@ -591,16 +600,30 @@ namespace kfs::project {
             const std::uint64_t density_bytes = publish_density_channel ? static_cast<std::uint64_t>(density.bytes()) : 0u;
             const std::uint64_t temperature_bytes = publish_temperature_channel ? static_cast<std::uint64_t>(temperature.bytes()) : 0u;
             const std::uint64_t total_bytes = density_bytes + temperature_bytes;
-            if (state.exports.volume.has_value() && state.exports.volume_revision == revision && state.exports.volume_byte_size == total_bytes && state.exports.volume_channel_mask == channel_mask) return;
+            const bool metadata_current = state.exports.volume.has_value() && state.exports.volume_revision == revision && state.exports.volume_byte_size == total_bytes && state.exports.volume_channel_mask == channel_mask;
+            const bool density_slot_current = !publish_density_channel || (state.exports.density_buffer.has_capacity(density_bytes) && state.exports.density_buffer.slot_revision(state.current_frame_slot_index) == revision);
+            const bool temperature_slot_current = !publish_temperature_channel || (state.exports.temperature_buffer.has_capacity(temperature_bytes) && state.exports.temperature_buffer.slot_revision(state.current_frame_slot_index) == revision);
+            if (metadata_current && density_slot_current && temperature_slot_current) return;
 
             std::vector<plugin::VolumeChannel> channels;
             channels.reserve(2u);
             const cudaStream_t stream = state.smoke->stream;
             if (publish_density_channel) {
+                const bool initialize_slots = !state.exports.density_buffer.has_capacity(density_bytes);
                 state.exports.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, density_bytes, "density volume");
-                float* const density_values = state.exports.density_buffer.mapped_as<float>();
+                float* const density_values = state.exports.density_buffer.mapped_as<float>(state.current_frame_slot_index);
                 if (density_values == nullptr) throw std::runtime_error{"Keyframe smoke density external buffer was not mapped."};
-                if (const cudaError_t status = cudaMemcpyAsync(density_values, density.data, density_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+                if (initialize_slots) {
+                    for (std::uint32_t frame_slot_index = 0u; frame_slot_index < state.exports.density_buffer.frame_slot_count(); ++frame_slot_index) {
+                        if (const cudaError_t status = cudaMemcpyAsync(state.exports.density_buffer.mapped_as<float>(frame_slot_index), density.data, density_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+                        state.exports.density_buffer.record_ready(frame_slot_index, stream);
+                        state.exports.density_buffer.set_slot_revision(frame_slot_index, revision);
+                    }
+                } else if (!density_slot_current) {
+                    if (const cudaError_t status = cudaMemcpyAsync(density_values, density.data, density_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke density volume failed: "} + cudaGetErrorString(status)};
+                    state.exports.density_buffer.record_ready(state.current_frame_slot_index, stream);
+                    state.exports.density_buffer.set_slot_revision(state.current_frame_slot_index, revision);
+                }
                 channels.push_back(plugin::VolumeChannel{
                     .name                    = "density",
                     .format                  = plugin::VolumeChannelFormat::Float32,
@@ -608,14 +631,26 @@ namespace kfs::project {
                     .index_encoding          = plugin::VolumeChannelIndexEncoding::Linear,
                     .buffer_id               = state.exports.density_buffer.resource_id(),
                     .external_device_pointer = reinterpret_cast<std::uintptr_t>(density_values),
+                    .external_ready_event    = state.exports.density_buffer.ready_event(state.current_frame_slot_index),
                     .source_byte_size        = density_bytes,
                 });
             }
             if (publish_temperature_channel) {
+                const bool initialize_slots = !state.exports.temperature_buffer.has_capacity(temperature_bytes);
                 state.exports.temperature_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, temperature_bytes, "temperature volume");
-                float* const temperature_values = state.exports.temperature_buffer.mapped_as<float>();
+                float* const temperature_values = state.exports.temperature_buffer.mapped_as<float>(state.current_frame_slot_index);
                 if (temperature_values == nullptr) throw std::runtime_error{"Keyframe smoke temperature external buffer was not mapped."};
-                if (const cudaError_t status = cudaMemcpyAsync(temperature_values, temperature.data, temperature_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke temperature volume failed: "} + cudaGetErrorString(status)};
+                if (initialize_slots) {
+                    for (std::uint32_t frame_slot_index = 0u; frame_slot_index < state.exports.temperature_buffer.frame_slot_count(); ++frame_slot_index) {
+                        if (const cudaError_t status = cudaMemcpyAsync(state.exports.temperature_buffer.mapped_as<float>(frame_slot_index), temperature.data, temperature_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke temperature volume failed: "} + cudaGetErrorString(status)};
+                        state.exports.temperature_buffer.record_ready(frame_slot_index, stream);
+                        state.exports.temperature_buffer.set_slot_revision(frame_slot_index, revision);
+                    }
+                } else if (!temperature_slot_current) {
+                    if (const cudaError_t status = cudaMemcpyAsync(temperature_values, temperature.data, temperature_bytes, cudaMemcpyDeviceToDevice, stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpyAsync Keyframe smoke temperature volume failed: "} + cudaGetErrorString(status)};
+                    state.exports.temperature_buffer.record_ready(state.current_frame_slot_index, stream);
+                    state.exports.temperature_buffer.set_slot_revision(state.current_frame_slot_index, revision);
+                }
                 channels.push_back(plugin::VolumeChannel{
                     .name                    = "temperature",
                     .format                  = plugin::VolumeChannelFormat::Float32,
@@ -623,13 +658,14 @@ namespace kfs::project {
                     .index_encoding          = plugin::VolumeChannelIndexEncoding::Linear,
                     .buffer_id               = state.exports.temperature_buffer.resource_id(),
                     .external_device_pointer = reinterpret_cast<std::uintptr_t>(temperature_values),
+                    .external_ready_event    = state.exports.temperature_buffer.ready_event(state.current_frame_slot_index),
                     .source_byte_size        = temperature_bytes,
                 });
             }
             if (channel_mask != 0u)
                 if (const cudaError_t status = cudaStreamSynchronize(stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe smoke volume failed: "} + cudaGetErrorString(status)};
 
-            state.exports.volume = plugin::VolumeGrid{
+            if (!metadata_current) state.exports.volume = plugin::VolumeGrid{
                 .name       = volume_name,
                 .dimensions = dimensions,
                 .origin     = {0.0f, 0.0f, 0.0f},
@@ -656,16 +692,27 @@ namespace kfs::project {
             const std::uint64_t byte_size        = word_count * sizeof(std::uint32_t);
             const std::uint64_t revision         = static_cast<std::uint64_t>(state.smoke->current_step) + 1u;
             const std::array dimensions          = std::array{static_cast<std::uint32_t>(indices.resolution[0]), static_cast<std::uint32_t>(indices.resolution[1]), static_cast<std::uint32_t>(indices.resolution[2])};
-            if (state.exports.cell_indices.has_value() && state.exports.cell_indices_revision == revision && state.exports.cell_indices_byte_size == byte_size && state.exports.cell_indices->cell_scale == state.display.cell_index_cell_scale) return;
+            const bool metadata_current = state.exports.cell_indices.has_value() && state.exports.cell_indices_revision == revision && state.exports.cell_indices_byte_size == byte_size && state.exports.cell_indices->cell_scale == state.display.cell_index_cell_scale;
+            const bool slot_current = state.exports.cell_indices_buffer.has_capacity(byte_size) && state.exports.cell_indices_buffer.slot_revision(state.current_frame_slot_index) == revision;
+            if (metadata_current && slot_current) return;
 
+            const bool initialize_slots = !state.exports.cell_indices_buffer.has_capacity(byte_size);
             state.exports.cell_indices_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportVoxelGrid, byte_size, "cell indices");
-            std::uint32_t* const bitfield_words = state.exports.cell_indices_buffer.mapped_as<std::uint32_t>();
+            std::uint32_t* const bitfield_words = state.exports.cell_indices_buffer.mapped_as<std::uint32_t>(state.current_frame_slot_index);
             if (bitfield_words == nullptr) throw std::runtime_error{"Keyframe cell index external buffer was not mapped."};
             const cudaStream_t stream = state.smoke->stream;
-            xayah::core::field::pack(stream, bitfield_words, indices);
+            if (initialize_slots) {
+                for (std::uint32_t frame_slot_index = 0u; frame_slot_index < state.exports.cell_indices_buffer.frame_slot_count(); ++frame_slot_index) {
+                    xayah::core::field::pack(stream, state.exports.cell_indices_buffer.mapped_as<std::uint32_t>(frame_slot_index), indices);
+                    state.exports.cell_indices_buffer.set_slot_revision(frame_slot_index, revision);
+                }
+            } else if (!slot_current) {
+                xayah::core::field::pack(stream, bitfield_words, indices);
+                state.exports.cell_indices_buffer.set_slot_revision(state.current_frame_slot_index, revision);
+            }
             if (const cudaError_t status = cudaStreamSynchronize(stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaStreamSynchronize Keyframe cell index bitfield failed: "} + cudaGetErrorString(status)};
 
-            state.exports.cell_indices = plugin::ViewportVoxelGrid{
+            if (!metadata_current) state.exports.cell_indices = plugin::ViewportVoxelGrid{
                 .name           = cell_indices_grid_name,
                 .owner          = plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::VolumeGrid, .name = volume_name},
                 .dimensions     = dimensions,
@@ -750,11 +797,16 @@ namespace kfs::project {
     }
 
     void ExternalGpuBuffer::reset() noexcept {
-        this->mapped_buffer = nullptr;
-        if (this->external_memory != nullptr) {
-            static_cast<void>(cudaDestroyExternalMemory(this->external_memory));
-            this->external_memory = nullptr;
-        }
+        for (const cudaEvent_t ready_event : this->ready_events)
+            if (ready_event != nullptr) static_cast<void>(cudaEventDestroy(ready_event));
+        this->ready_events.clear();
+        for (void* const mapped_buffer : this->mapped_buffers)
+            if (mapped_buffer != nullptr) static_cast<void>(cudaFree(mapped_buffer));
+        this->mapped_buffers.clear();
+        this->slot_revisions.clear();
+        for (const cudaExternalMemory_t external_memory : this->external_memories)
+            if (external_memory != nullptr) static_cast<void>(cudaDestroyExternalMemory(external_memory));
+        this->external_memories.clear();
         if (this->allocation.resource_id != 0u && this->host_services != nullptr) {
             try {
                 this->host_services->release_gpu_buffer(this->allocation.resource_id);
@@ -774,6 +826,26 @@ namespace kfs::project {
         return this->allocation.resource_id;
     }
 
+        std::uint32_t ExternalGpuBuffer::frame_slot_count() const noexcept {
+            return static_cast<std::uint32_t>(this->mapped_buffers.size());
+        }
+
+        std::uintptr_t ExternalGpuBuffer::ready_event(const std::uint32_t frame_slot_index) const noexcept {
+            return reinterpret_cast<std::uintptr_t>(this->ready_events[frame_slot_index]);
+        }
+
+        void ExternalGpuBuffer::record_ready(const std::uint32_t frame_slot_index, const cudaStream_t stream) {
+            if (const cudaError_t status = cudaEventRecord(this->ready_events[frame_slot_index], stream); status != cudaSuccess) throw std::runtime_error{std::string{"cudaEventRecord for external GPU buffer failed: "} + cudaGetErrorString(status)};
+        }
+
+        std::uint64_t ExternalGpuBuffer::slot_revision(const std::uint32_t frame_slot_index) const noexcept {
+            return this->slot_revisions[frame_slot_index];
+        }
+
+        void ExternalGpuBuffer::set_slot_revision(const std::uint32_t frame_slot_index, const std::uint64_t revision) noexcept {
+            this->slot_revisions[frame_slot_index] = revision;
+        }
+
     void ExternalGpuBuffer::ensure(std::shared_ptr<plugin::HostServices> next_host_services, const std::uint32_t kind, const std::uint64_t requested_byte_size, const std::string_view label) {
         if (this->has_capacity(requested_byte_size)) return;
         this->reset();
@@ -785,57 +857,75 @@ namespace kfs::project {
         if (next_allocation.resource_id == 0u) throw std::runtime_error{std::format("Spectra returned an invalid {} resource id.", label)};
         if (next_allocation.kind != kind) throw std::runtime_error{std::format("Spectra returned an unexpected GPU buffer kind for {}.", label)};
         if (next_allocation.byte_size < requested_byte_size) {
-            close_imported_handle(next_allocation);
+            for (plugin::GpuBufferSlotAllocation& slot : next_allocation.slots) close_imported_handle(slot);
             next_host_services->release_gpu_buffer(next_allocation.resource_id);
             throw std::runtime_error{std::format("Spectra returned a {} buffer smaller than requested.", label)};
         }
-        if (next_allocation.handle == 0u) {
-            next_host_services->release_gpu_buffer(next_allocation.resource_id);
-            throw std::runtime_error{std::format("Spectra returned an empty {} external memory handle.", label)};
-        }
 
+        std::vector<cudaExternalMemory_t> imported_memories{};
+        std::vector<void*> mapped_buffers{};
+        std::vector<cudaEvent_t> ready_events{};
         try {
             validate_cuda_device_identity(next_allocation.device_identity);
-            cudaExternalMemoryHandleDesc memory_desc{};
-            memory_desc.size = next_allocation.byte_size;
-            switch (next_allocation.handle_kind) {
+            imported_memories.reserve(next_allocation.slots.size());
+            mapped_buffers.reserve(next_allocation.slots.size());
+            for (plugin::GpuBufferSlotAllocation& slot : next_allocation.slots) {
+                cudaExternalMemoryHandleDesc memory_desc{};
+                memory_desc.size = next_allocation.byte_size;
+                switch (slot.handle_kind) {
 #if defined(_WIN32)
-            case plugin::GpuResourceHandleKind::OpaqueWin32:
-                memory_desc.type                = cudaExternalMemoryHandleTypeOpaqueWin32;
-                memory_desc.handle.win32.handle = reinterpret_cast<void*>(next_allocation.handle);
-                break;
+                case plugin::GpuResourceHandleKind::OpaqueWin32:
+                    memory_desc.type                = cudaExternalMemoryHandleTypeOpaqueWin32;
+                    memory_desc.handle.win32.handle = reinterpret_cast<void*>(slot.handle);
+                    break;
 #else
-            case plugin::GpuResourceHandleKind::OpaqueFileDescriptor:
-                memory_desc.type      = cudaExternalMemoryHandleTypeOpaqueFd;
-                memory_desc.handle.fd = static_cast<int>(next_allocation.handle);
-                break;
+                case plugin::GpuResourceHandleKind::OpaqueFileDescriptor:
+                    memory_desc.type      = cudaExternalMemoryHandleTypeOpaqueFd;
+                    memory_desc.handle.fd = static_cast<int>(slot.handle);
+                    break;
 #endif
-            default: throw std::runtime_error{std::format("Spectra returned an unsupported {} external memory handle kind.", label)};
-            }
+                default: throw std::runtime_error{std::format("Spectra returned an unsupported {} external memory handle kind.", label)};
+                }
 
-            cudaExternalMemory_t imported_memory{};
-            const cudaError_t import_status = cudaImportExternalMemory(&imported_memory, &memory_desc);
-            close_imported_handle(next_allocation);
-            if (import_status != cudaSuccess) throw std::runtime_error{std::format("cudaImportExternalMemory for {} failed: {}", label, cudaGetErrorString(import_status))};
+                cudaExternalMemory_t imported_memory{};
+                const cudaError_t import_status = cudaImportExternalMemory(&imported_memory, &memory_desc);
+                close_imported_handle(slot);
+                if (import_status != cudaSuccess) throw std::runtime_error{std::format("cudaImportExternalMemory for {} failed: {}", label, cudaGetErrorString(import_status))};
 
-            cudaExternalMemoryBufferDesc buffer_desc{};
-            buffer_desc.size         = next_allocation.byte_size;
-            void* next_mapped_buffer = nullptr;
-            if (const cudaError_t status = cudaExternalMemoryGetMappedBuffer(&next_mapped_buffer, imported_memory, &buffer_desc); status != cudaSuccess) {
-                static_cast<void>(cudaDestroyExternalMemory(imported_memory));
-                throw std::runtime_error{std::format("cudaExternalMemoryGetMappedBuffer for {} failed: {}", label, cudaGetErrorString(status))};
+                cudaExternalMemoryBufferDesc buffer_desc{};
+                buffer_desc.size         = next_allocation.byte_size;
+                void* next_mapped_buffer = nullptr;
+                if (const cudaError_t status = cudaExternalMemoryGetMappedBuffer(&next_mapped_buffer, imported_memory, &buffer_desc); status != cudaSuccess) {
+                    static_cast<void>(cudaDestroyExternalMemory(imported_memory));
+                    throw std::runtime_error{std::format("cudaExternalMemoryGetMappedBuffer for {} failed: {}", label, cudaGetErrorString(status))};
+                }
+                imported_memories.push_back(imported_memory);
+                mapped_buffers.push_back(next_mapped_buffer);
             }
-            if (next_mapped_buffer == nullptr) {
-                static_cast<void>(cudaDestroyExternalMemory(imported_memory));
-                throw std::runtime_error{std::format("cudaExternalMemoryGetMappedBuffer returned null for {}.", label)};
+            if (kind == plugin::GpuBufferKindVolumeChannel) {
+                ready_events.reserve(mapped_buffers.size());
+                for (std::size_t frame_slot_index = 0u; frame_slot_index < mapped_buffers.size(); ++frame_slot_index) {
+                    cudaEvent_t ready_event{};
+                    if (const cudaError_t status = cudaEventCreateWithFlags(&ready_event, cudaEventDisableTiming); status != cudaSuccess) throw std::runtime_error{std::string{"cudaEventCreateWithFlags for volume buffer failed: "} + cudaGetErrorString(status)};
+                    ready_events.push_back(ready_event);
+                }
             }
-            this->host_services   = std::move(next_host_services);
-            this->allocation      = next_allocation;
-            this->external_memory = imported_memory;
-            this->mapped_buffer   = next_mapped_buffer;
-            this->byte_size       = requested_byte_size;
+            this->host_services = std::move(next_host_services);
+            this->allocation = std::move(next_allocation);
+            this->external_memories = std::move(imported_memories);
+            this->mapped_buffers = std::move(mapped_buffers);
+            this->ready_events = std::move(ready_events);
+            this->slot_revisions.assign(this->mapped_buffers.size(), 0u);
+            this->byte_size = requested_byte_size;
         } catch (...) {
-            if (next_allocation.handle != 0u) close_imported_handle(next_allocation);
+            for (plugin::GpuBufferSlotAllocation& slot : next_allocation.slots)
+                if (slot.handle != 0u) close_imported_handle(slot);
+            for (void* const mapped_buffer : mapped_buffers)
+                if (mapped_buffer != nullptr) static_cast<void>(cudaFree(mapped_buffer));
+            for (const cudaEvent_t ready_event : ready_events)
+                if (ready_event != nullptr) static_cast<void>(cudaEventDestroy(ready_event));
+            for (const cudaExternalMemory_t external_memory : imported_memories)
+                if (external_memory != nullptr) static_cast<void>(cudaDestroyExternalMemory(external_memory));
             next_host_services->release_gpu_buffer(next_allocation.resource_id);
             throw;
         }
@@ -931,8 +1021,13 @@ namespace kfs::project {
         if (this->state == nullptr || this->state->smoke == nullptr) throw std::runtime_error{"Keyframe smoke project is not open."};
         if (!std::isfinite(update.wall_delta_seconds) || update.wall_delta_seconds < 0.0) throw std::runtime_error{"Keyframe smoke project wall delta time is invalid."};
         if (!std::isfinite(update.update_delta_seconds) || update.update_delta_seconds < 0.0) throw std::runtime_error{"Keyframe smoke project update delta time is invalid."};
+        this->state->current_frame_slot_index = update.frame_slot_index;
         this->state->host_update_running = update.update_running;
-        if (update.update_delta_seconds == 0.0) return;
+        if (update.update_delta_seconds == 0.0) {
+            publish_volume_channels(*this->state);
+            publish_cell_indices(*this->state);
+            return;
+        }
 
         apply_settings_to_solver(*this->state);
         const double step_seconds                 = static_cast<double>(this->state->simulation.delta_seconds) * static_cast<double>(this->state->simulation.steps_per_update);
@@ -956,6 +1051,8 @@ namespace kfs::project {
         this->state->exports.volume_channel_mask    = 0u;
         this->state->exports.cell_indices_revision  = 0u;
         this->state->exports.cell_indices_byte_size = 0u;
+        publish_volume_channels(*this->state);
+        publish_cell_indices(*this->state);
         ++this->state->scene_revision;
     }
 
@@ -1054,6 +1151,39 @@ namespace kfs::project {
             controls.metric("temperature_sum", "Temperature Sum", std::format("{:.6g}", stats.temperature.sum)).section(section_statistics_id);
             controls.metric("temperature_max", "Temperature Max", std::format("{:.6g}", stats.temperature.max)).section(section_statistics_id);
         }
+        controls.setting(setting_scene_key, std::string{scene_preset_name(this->state->scene.preset)});
+        controls.setting(setting_collider_scale_key, std::format("{}", this->state->scene.collider_scale));
+        controls.setting(setting_moving_gate_amplitude_key, std::format("{}", this->state->scene.moving_gate_amplitude));
+        controls.setting(setting_moving_gate_speed_key, std::format("{}", this->state->scene.moving_gate_speed));
+        controls.setting(setting_constraint_scalar_key, std::format("{}", this->state->scene.constraint_scalar));
+        controls.setting(setting_delta_seconds_key, std::format("{}", this->state->simulation.delta_seconds));
+        controls.setting(setting_steps_per_update_key, std::to_string(this->state->simulation.steps_per_update));
+        controls.setting(setting_vorticity_confinement_key, std::format("{}", this->state->simulation.vorticity_confinement));
+        controls.setting(setting_ambient_temperature_key, std::format("{}", this->state->simulation.ambient_temperature));
+        controls.setting(setting_buoyancy_density_factor_key, std::format("{}", this->state->simulation.buoyancy_density_factor));
+        controls.setting(setting_buoyancy_temperature_factor_key, std::format("{}", this->state->simulation.buoyancy_temperature_factor));
+        controls.setting(setting_density_emission_rate_key, std::format("{}", this->state->simulation.density_emission_rate));
+        controls.setting(setting_temperature_emission_rate_key, std::format("{}", this->state->simulation.temperature_emission_rate));
+        controls.setting(setting_emitter_center_x_key, std::format("{}", this->state->emitter.center[0]));
+        controls.setting(setting_emitter_center_y_key, std::format("{}", this->state->emitter.center[1]));
+        controls.setting(setting_emitter_center_z_key, std::format("{}", this->state->emitter.center[2]));
+        controls.setting(setting_emitter_radius_x_key, std::format("{}", this->state->emitter.radius[0]));
+        controls.setting(setting_emitter_radius_y_key, std::format("{}", this->state->emitter.radius[1]));
+        controls.setting(setting_emitter_radius_z_key, std::format("{}", this->state->emitter.radius[2]));
+        controls.setting(setting_emitter_falloff_key, std::format("{}", this->state->emitter.falloff));
+        controls.setting(setting_show_emitter_key, this->state->display.show_emitter ? "true" : "false");
+        controls.setting(setting_show_colliders_key, this->state->display.show_colliders ? "true" : "false");
+        controls.setting(setting_show_density_key, this->state->display.show_density ? "true" : "false");
+        controls.setting(setting_density_scale_key, std::format("{}", this->state->display.density_scale));
+        controls.setting(setting_show_temperature_key, this->state->display.show_temperature ? "true" : "false");
+        controls.setting(setting_temperature_scale_key, std::format("{}", this->state->display.temperature_scale));
+        controls.setting(setting_show_cell_indices_key, this->state->display.show_cell_indices ? "true" : "false");
+        controls.setting(setting_cell_index_cell_scale_key, std::format("{}", this->state->display.cell_index_cell_scale));
+        controls.setting(setting_show_domain_key, this->state->display.show_domain ? "true" : "false");
+        controls.setting(setting_camera_yaw_degrees_key, std::format("{}", this->state->display.camera_yaw_degrees));
+        controls.setting(setting_camera_pitch_degrees_key, std::format("{}", this->state->display.camera_pitch_degrees));
+        controls.setting(setting_camera_distance_key, std::format("{}", this->state->display.camera_distance));
+        controls.setting(setting_camera_fov_degrees_key, std::format("{}", this->state->display.camera_fov_degrees));
     }
 
     void Project::reset_simulation() {
@@ -1362,6 +1492,6 @@ namespace kfs::project {
     }
 } // namespace kfs::project
 
-extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v18(void) -> decltype(kfs::plugin::export_plugin<kfs::project::Project>()) {
+extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v21(void) -> decltype(kfs::plugin::export_plugin<kfs::project::Project>()) {
     return kfs::plugin::export_plugin<kfs::project::Project>();
 }

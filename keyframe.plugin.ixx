@@ -42,6 +42,9 @@ export namespace kfs::plugin {
         float numeric_min{};
         float numeric_max{};
         float numeric_step{};
+        std::uint64_t unsigned_min{};
+        std::uint64_t unsigned_max{};
+        std::uint64_t unsigned_step{};
 
         OptionSchema& section(std::string value) & {
             this->section_id = std::move(value);
@@ -110,6 +113,24 @@ export namespace kfs::plugin {
             this->numeric_step      = step;
             return std::move(*this);
         }
+
+        OptionSchema& slider(const std::uint64_t min, const std::uint64_t max, const std::uint64_t step) & {
+            this->presentation      = ControlOptionPresentationSlider;
+            this->has_numeric_range = true;
+            this->unsigned_min      = min;
+            this->unsigned_max      = max;
+            this->unsigned_step     = step;
+            return *this;
+        }
+
+        [[nodiscard]] OptionSchema slider(const std::uint64_t min, const std::uint64_t max, const std::uint64_t step) && {
+            this->presentation      = ControlOptionPresentationSlider;
+            this->has_numeric_range = true;
+            this->unsigned_min      = min;
+            this->unsigned_max      = max;
+            this->unsigned_step     = step;
+            return std::move(*this);
+        }
     };
 
     struct Option {
@@ -146,12 +167,16 @@ export namespace kfs::plugin {
     inline constexpr std::uint32_t GpuBufferKindPointCloud         = 2u;
     inline constexpr std::uint32_t GpuBufferKindViewportSegmentSet = 3u;
 
+    struct GpuBufferSlotAllocation {
+        GpuResourceHandleKind handle_kind{GpuResourceHandleKind::OpaqueWin32};
+        std::uintptr_t handle{};
+    };
+
     struct GpuBufferAllocation {
         std::uint64_t resource_id{};
         std::uint64_t byte_size{};
         std::uint32_t kind{};
-        GpuResourceHandleKind handle_kind{GpuResourceHandleKind::OpaqueWin32};
-        std::uintptr_t handle{};
+        std::vector<GpuBufferSlotAllocation> slots{};
         GpuDeviceIdentity device_identity{};
     };
 
@@ -186,12 +211,22 @@ export namespace kfs::plugin {
         std::string disabled_reason{};
     };
 
+    struct SettingState {
+        std::string key{};
+        std::string value{};
+        bool has_unsigned_range{};
+        std::uint64_t unsigned_min{};
+        std::uint64_t unsigned_max{};
+        std::uint64_t unsigned_step{};
+    };
+
     struct ControlState {
         std::string phase{};
         std::string headline{};
         std::string detail{};
         std::vector<Metric> metrics{};
         std::vector<ActionState> action_states{};
+        std::vector<SettingState> setting_states{};
     };
 
     struct UpdateInfo {
@@ -199,6 +234,8 @@ export namespace kfs::plugin {
         double update_delta_seconds{};
         double timeline_time_seconds{};
         std::uint64_t timeline_frame_index{};
+        std::uint32_t frame_slot_index{};
+        std::uint32_t frame_slot_count{};
         bool update_running{};
     };
 
@@ -369,6 +406,7 @@ export namespace kfs::plugin {
         VolumeChannelIndexEncoding index_encoding{VolumeChannelIndexEncoding::Linear};
         std::uint64_t buffer_id{};
         std::uintptr_t external_device_pointer{};
+        std::uintptr_t external_ready_event{};
         std::uint64_t source_byte_size{};
     };
 
@@ -585,6 +623,16 @@ export namespace kfs::plugin {
 
         ControlBuilder& disable(std::string action_id, std::string reason) {
             this->value.action_states.push_back(ActionState{.action_id = std::move(action_id), .enabled = false, .disabled_reason = std::move(reason)});
+            return *this;
+        }
+
+        ControlBuilder& setting(std::string key, std::string setting_value) {
+            this->value.setting_states.push_back(SettingState{.key = std::move(key), .value = std::move(setting_value)});
+            return *this;
+        }
+
+        ControlBuilder& unsigned_setting(std::string key, const std::uint64_t setting_value, const std::uint64_t minimum, const std::uint64_t maximum, const std::uint64_t step) {
+            this->value.setting_states.push_back(SettingState{.key = std::move(key), .value = std::to_string(setting_value), .has_unsigned_range = true, .unsigned_min = minimum, .unsigned_max = maximum, .unsigned_step = step});
             return *this;
         }
 
@@ -856,7 +904,7 @@ export namespace kfs::plugin {
 } // namespace kfs::plugin
 
 namespace kfs::plugin {
-    constexpr std::uint32_t plugin_abi_version = 18u;
+    constexpr std::uint32_t plugin_abi_version = 21u;
     typedef void SpectraSceneInstance;
 
     typedef std::uint32_t SpectraSceneResult;
@@ -915,6 +963,9 @@ namespace kfs::plugin {
         float numeric_min{};
         float numeric_max{};
         float numeric_step{};
+        std::uint64_t unsigned_min{};
+        std::uint64_t unsigned_max{};
+        std::uint64_t unsigned_step{};
     };
 
     struct SpectraSceneControlOptionSchemaSpan {
@@ -961,6 +1012,20 @@ namespace kfs::plugin {
         std::uint64_t count{};
     };
 
+    struct SpectraSceneControlSettingState {
+        const char* key{};
+        const char* value{};
+        std::uint32_t has_unsigned_range{};
+        std::uint64_t unsigned_min{};
+        std::uint64_t unsigned_max{};
+        std::uint64_t unsigned_step{};
+    };
+
+    struct SpectraSceneControlSettingStateSpan {
+        const SpectraSceneControlSettingState* data{};
+        std::uint64_t count{};
+    };
+
     struct SpectraSceneControlStateView {
         std::uint64_t struct_size{};
         const char* phase{};
@@ -968,6 +1033,7 @@ namespace kfs::plugin {
         const char* detail{};
         SpectraSceneControlMetricSpan metrics{};
         SpectraSceneControlActionStateSpan action_states{};
+        SpectraSceneControlSettingStateSpan setting_states{};
     };
 
     struct SpectraSceneUpdateInfo {
@@ -976,6 +1042,8 @@ namespace kfs::plugin {
         double update_delta_seconds{};
         double timeline_time_seconds{};
         std::uint64_t timeline_frame_index{};
+        std::uint32_t frame_slot_index{};
+        std::uint32_t frame_slot_count{};
         std::uint32_t update_running{};
     };
 
@@ -993,13 +1061,22 @@ namespace kfs::plugin {
         std::uint64_t byte_size{};
     };
 
+    struct SpectraSceneGpuBufferSlotAllocation {
+        std::uint32_t handle_kind{};
+        std::uintptr_t handle{};
+    };
+
+    struct SpectraSceneGpuBufferSlotAllocationSpan {
+        const SpectraSceneGpuBufferSlotAllocation* data{};
+        std::uint64_t count{};
+    };
+
     struct SpectraSceneGpuBufferAllocation {
         std::uint64_t struct_size{};
         std::uint64_t resource_id{};
         std::uint64_t byte_size{};
         std::uint32_t kind{};
-        std::uint32_t handle_kind{};
-        std::uintptr_t handle{};
+        SpectraSceneGpuBufferSlotAllocationSpan slots{};
         SpectraSceneGpuDeviceIdentity device_identity{};
     };
 
@@ -1188,6 +1265,7 @@ namespace kfs::plugin {
         std::uint32_t index_encoding{};
         std::uint64_t buffer_id{};
         std::uintptr_t external_device_pointer{};
+        std::uintptr_t external_ready_event{};
         std::uint64_t source_byte_size{};
     };
 
@@ -1399,6 +1477,7 @@ namespace kfs::plugin {
             ControlState state{};
             std::vector<SpectraSceneControlMetric> metric_views{};
             std::vector<SpectraSceneControlActionState> action_state_views{};
+            std::vector<SpectraSceneControlSettingState> setting_state_views{};
         };
 
         struct PluginExportState {
@@ -1489,6 +1568,9 @@ namespace kfs::plugin {
                     .numeric_min       = schema.numeric_min,
                     .numeric_max       = schema.numeric_max,
                     .numeric_step      = schema.numeric_step,
+                    .unsigned_min      = schema.unsigned_min,
+                    .unsigned_max      = schema.unsigned_max,
+                    .unsigned_step     = schema.unsigned_step,
                 });
             }
             return storage;
@@ -1674,6 +1756,7 @@ namespace kfs::plugin {
                         .index_encoding          = static_cast<std::uint32_t>(channel.index_encoding),
                         .buffer_id               = channel.buffer_id,
                         .external_device_pointer = channel.external_device_pointer,
+                        .external_ready_event    = channel.external_ready_event,
                         .source_byte_size        = channel.source_byte_size,
                     };
                     cache.volume_channel_storage[volume_index].push_back(channel_view);
@@ -1895,8 +1978,10 @@ namespace kfs::plugin {
         [[nodiscard]] SpectraSceneControlStateView make_control_state_abi_view(ControlStateAbiStorage& cache) {
             cache.metric_views.clear();
             cache.action_state_views.clear();
+            cache.setting_state_views.clear();
             cache.metric_views.reserve(cache.state.metrics.size());
             cache.action_state_views.reserve(cache.state.action_states.size());
+            cache.setting_state_views.reserve(cache.state.setting_states.size());
             for (const Metric& metric : cache.state.metrics) {
                 cache.metric_views.push_back(SpectraSceneControlMetric{
                     .key           = metric.key.c_str(),
@@ -1916,6 +2001,16 @@ namespace kfs::plugin {
                     .disabled_reason = action_state.disabled_reason.c_str(),
                 });
             }
+            for (const SettingState& setting_state : cache.state.setting_states) {
+                cache.setting_state_views.push_back(SpectraSceneControlSettingState{
+                    .key                = setting_state.key.c_str(),
+                    .value              = setting_state.value.c_str(),
+                    .has_unsigned_range = setting_state.has_unsigned_range ? 1u : 0u,
+                    .unsigned_min       = setting_state.unsigned_min,
+                    .unsigned_max       = setting_state.unsigned_max,
+                    .unsigned_step      = setting_state.unsigned_step,
+                });
+            }
             return SpectraSceneControlStateView{
                 .struct_size   = sizeof(SpectraSceneControlStateView),
                 .phase         = cache.state.phase.c_str(),
@@ -1923,6 +2018,7 @@ namespace kfs::plugin {
                 .detail        = cache.state.detail.c_str(),
                 .metrics       = SpectraSceneControlMetricSpan{.data = cache.metric_views.empty() ? nullptr : cache.metric_views.data(), .count = static_cast<std::uint64_t>(cache.metric_views.size())},
                 .action_states = SpectraSceneControlActionStateSpan{.data = cache.action_state_views.empty() ? nullptr : cache.action_state_views.data(), .count = static_cast<std::uint64_t>(cache.action_state_views.size())},
+                .setting_states = SpectraSceneControlSettingStateSpan{.data = cache.setting_state_views.empty() ? nullptr : cache.setting_state_views.data(), .count = static_cast<std::uint64_t>(cache.setting_state_views.size())},
             };
         }
 
@@ -1971,14 +2067,19 @@ namespace kfs::plugin {
                     if (result != SPECTRA_SCENE_RESULT_OK) throw std::runtime_error(host_services_error(*host_services_view));
                     if (allocation.struct_size != sizeof(SpectraSceneGpuBufferAllocation)) throw std::runtime_error("scene plugin GPU buffer allocation ABI size mismatch");
                     if (allocation.kind != abi_kind) throw std::runtime_error(std::format("scene plugin GPU buffer allocation kind {} does not match request kind {}", allocation.kind, abi_kind));
-                    return GpuBufferAllocation{
+                    GpuBufferAllocation decoded{
                                          .resource_id     = allocation.resource_id,
                                          .byte_size       = allocation.byte_size,
                                          .kind            = kind,
-                                         .handle_kind     = gpu_handle_kind_from_abi(allocation.handle_kind),
-                                         .handle          = allocation.handle,
                                          .device_identity = device_identity_from_abi(allocation.device_identity),
                     };
+                    decoded.slots.reserve(static_cast<std::size_t>(allocation.slots.count));
+                    for (std::uint64_t frame_slot_index = 0u; frame_slot_index < allocation.slots.count; ++frame_slot_index)
+                        decoded.slots.push_back(GpuBufferSlotAllocation{
+                            .handle_kind = gpu_handle_kind_from_abi(allocation.slots.data[frame_slot_index].handle_kind),
+                            .handle = allocation.slots.data[frame_slot_index].handle,
+                        });
+                    return decoded;
                 };
                 host_services->release_gpu_buffer = [host_services_view](const std::uint64_t resource_id) {
                     const SpectraSceneResult result = host_services_view->release_gpu_buffer(host_services_view->user_data, resource_id);
@@ -2056,6 +2157,8 @@ namespace kfs::plugin {
                                                                                 .update_delta_seconds  = update_info->update_delta_seconds,
                                                                                 .timeline_time_seconds = update_info->timeline_time_seconds,
                                                                                 .timeline_frame_index  = update_info->timeline_frame_index,
+                                                                                .frame_slot_index       = update_info->frame_slot_index,
+                                                                                .frame_slot_count       = update_info->frame_slot_count,
                                                                                 .update_running        = update_info->update_running != 0u,
                                                                             });
                 return SPECTRA_SCENE_RESULT_OK;
